@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+
+# Jupyter (if you use it later)
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs / outputs
+logs/
+outputs/
+*.log
+
+# Matplotlib cache
+.matplotlib/
+
+# IDEs
+.vscode/
+.idea/
+
+# Haskell (for CSP module later)
+dist/
+dist-newstyle/
+*.hi
+*.o
+*.hi-boot
+
+# experiment results
+experiments/results/*
+!experiments/results/.keep
