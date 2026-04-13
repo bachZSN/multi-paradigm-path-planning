@@ -5,8 +5,6 @@ import pygame
 def main():
     # Create the grid world
     world = create_default_world()
-    print("Grid world initialized")
-    print("Obstacles:", len(world.obstacles))
 
     # Create an agent
     agent = Agent(start=(0, 0), goal=(19, 19))

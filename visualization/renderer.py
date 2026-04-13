@@ -51,22 +51,3 @@ class Renderer:
                 pygame.draw.rect(self.screen, (200, 200, 200), rect, 1)
 
         pygame.display.flip()
-
-# Example usage
-if __name__ == "__main__":
-    from environments.grid_world import create_default_world, Agent
-
-    grid_world = create_default_world()
-    agent = Agent(start=(0, 0), goal=(19, 19))
-
-    renderer = Renderer(grid_width=20, grid_height=20)
-    running = True
-
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-
-        renderer.render_world(grid_world, agent)
-
-    pygame.quit()
