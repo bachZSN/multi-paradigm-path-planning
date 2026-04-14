@@ -21,7 +21,8 @@ def create_default_world():
     world = GridWorld(20, 20)
 
     # add some obstacles
-    for i in range(5, 15):
+    for i in range(1, 19):
+        world.add_obstacle(10, i)
         world.add_obstacle(i, 10)
 
     return world
