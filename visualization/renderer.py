@@ -1,53 +1,44 @@
 import pygame
 
 class Renderer:
-    def __init__(self, grid_width, grid_height, screen_width=800, screen_height=800):
+    def __init__(self, world, screen_width=800, screen_height=800):
         pygame.init()
-        self.grid_width = grid_width
-        self.grid_height = grid_height
+        self.grid_width = world.width
+        self.grid_height = world.height
         self.screen_width = screen_width
         self.screen_height = screen_height
+        self.cell_size = min(screen_width // world.width, screen_height // world.height)
         self.screen = pygame.display.set_mode((screen_width, screen_height))
         pygame.display.set_caption("Grid World")
 
-    def render_world(self, grid_world, agent=None):
-        """Render the grid world with obstacles and agent."""
-        grid_data = [[0 for _ in range(grid_world.width)] for _ in range(grid_world.height)]
-
-        # Add obstacles
-        for x, y in grid_world.obstacles:
-            grid_data[y][x] = 1
-
-        # Add agent
-        if agent:
-            grid_data[agent.start[1]][agent.start[0]] = 2  # start
-            grid_data[agent.goal[1]][agent.goal[0]] = 3    # goal
-
-        self.render(grid_data)
-
-    def render(self, grid_data):
-        """Render grid data using pygame."""
+    def render_world(self, grid_world, agents=None):
         self.screen.fill((255, 255, 255))
 
-        cell_width = self.screen_width // self.grid_width
-        cell_height = self.screen_height // self.grid_height
+        self.draw_grid(grid_world)
+        self.draw_obstacles(grid_world)
 
-        for y, row in enumerate(grid_data):
-            for x, cell in enumerate(row):
-                rect = pygame.Rect(x * cell_width, y * cell_height, cell_width, cell_height)
-
-                if cell == 0:  # empty
-                    color = (255, 255, 255)
-                elif cell == 1:  # obstacle
-                    color = (0, 0, 0)
-                elif cell == 2:  # start
-                    color = (0, 255, 0)
-                elif cell == 3:  # goal
-                    color = (255, 0, 0)
-                else:
-                    color = (255, 255, 255)
-
-                pygame.draw.rect(self.screen, color, rect)
-                pygame.draw.rect(self.screen, (200, 200, 200), rect, 1)
+        if agents:
+            for agent in agents:
+                self.draw_agent(agent)
 
         pygame.display.flip()
+
+    def draw_grid(self, grid_world):
+        for x in range(self.grid_width):
+            for y in range(self.grid_height):
+                rect = pygame.Rect(x * self.cell_size, y * self.cell_size, self.cell_size, self.cell_size)
+                pygame.draw.rect(self.screen, (200, 200, 200), rect, 1)
+
+    def draw_obstacles(self, grid_world):
+        for x, y in grid_world.obstacles:
+            rect = pygame.Rect(x * self.cell_size, y * self.cell_size, self.cell_size, self.cell_size)
+            pygame.draw.rect(self.screen, (0, 0, 0), rect)
+
+    def draw_agent(self, agent):
+        # Draw start position
+        start_rect = pygame.Rect(agent.start[0] * self.cell_size, agent.start[1] * self.cell_size, self.cell_size, self.cell_size)
+        pygame.draw.rect(self.screen, (0, 255, 0), start_rect)
+
+        # Draw goal position
+        goal_rect = pygame.Rect(agent.goal[0] * self.cell_size, agent.goal[1] * self.cell_size, self.cell_size, self.cell_size)
+        pygame.draw.rect(self.screen, (255, 0, 0), goal_rect)
