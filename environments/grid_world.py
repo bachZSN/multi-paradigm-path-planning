@@ -6,9 +6,9 @@ including obstacles and validity checks, so that all methods
 (A*, CSP, gradient-based optimization) operate on the same problem instance.
 """
 class GridWorld:
-    def __init__(self, width: int, height: int):
-        self.width = width
-        self.height = height
+    def __init__(self, dimension: int):
+        self.width = dimension
+        self.height = dimension
         self.obstacles: list[GridLocation] = []
 
     def add_obstacle(self, x, y):
@@ -20,7 +20,7 @@ class GridWorld:
 GridLocation = tuple[int, int]
 
 def create_default_world():
-    world = GridWorld(100, 100)
+    world = GridWorld(100)
 
     # add some obstacles
     for i in range(1, 19):
