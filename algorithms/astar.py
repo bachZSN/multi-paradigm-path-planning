@@ -65,10 +65,3 @@ def reconstruct_path(node):
         path.append(node.position)
         node = node.parent
     return path[::-1]
-
-# Convert the grid world to a 2D grid representation
-def grid_world_to_grid(grid_world):
-    grid = [[0 for _ in range(grid_world.width)] for _ in range(grid_world.height)]
-    for x, y in grid_world.obstacles:
-        grid[y][x] = 1  # Mark obstacles as 1
-    return grid
