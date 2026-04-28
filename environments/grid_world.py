@@ -11,9 +11,19 @@ class GridWorld:
         self.width = dimension
         self.height = dimension
         self.grid = np.zeros((self.width, self.height))
+        self.max_height = 0  # Cached max height
+        self.min_height = 0  # Cached min height
+        self.update_heights()  # Initialize the cached values
+
+    def update_heights(self):
+        """Update the cached max and min heights."""
+        valid_heights = self.grid[(self.grid != -1) & (self.grid != float('inf'))]
+        self.max_height = valid_heights.max() if valid_heights.size > 0 else 0
+        self.min_height = valid_heights.min() if valid_heights.size > 0 else 0
 
     def add_obstacle(self, x, y, height=1.0):
         self.grid[x, y] = height
+        self.update_heights()
 
     def is_valid(self, x, y):
         return 0 <= x < self.width and 0 <= y < self.height and self.grid[x, y] >= 0 # -1 = invalid
@@ -41,6 +51,7 @@ class GridWorld:
                         self.grid[i, j] += max(0, height * (1 - distance / radius))
                     elif function == "arctan":
                         self.grid[i, j] += height * (1 - np.arctan(distance) / np.pi)
+        self.update_heights()
 
 def create_default_world():
     world = GridWorld(100)

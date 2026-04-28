@@ -1,4 +1,5 @@
 import heapq
+import numpy as np
 
 class Node:
     def __init__(self, position, parent=None):
@@ -12,6 +13,17 @@ class Node:
         return self.f < other.f
 
 def astar(start, goal, grid):
+    """
+    A* algorithm that incorporates height differences in the heuristic and cost.
+    Args:
+        start (tuple): Starting position (x, y).
+        goal (tuple): Goal position (x, y).
+        grid (np.ndarray): 2D grid representing the heights of the terrain.
+
+    Returns:
+        list: The path from start to goal.
+        list: A list of steps for visualization (each step contains the current node, neighbors, and path).
+    """
     open_list = []
     closed_list = set()
     start_node = Node(start)

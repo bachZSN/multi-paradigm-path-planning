@@ -31,8 +31,8 @@ class Renderer:
 
     def draw_height_map(self, grid_world):
         """Draw the grid as a height map using interval-based colors."""
-        max_height = grid_world.grid.max()  # Get the maximum height in the grid
-        min_height = grid_world.grid.min()  # Get the minimum height in the grid
+        max_height = grid_world.max_height  # Get the maximum height in the grid
+        min_height = grid_world.min_height  # Get the minimum height in the grid
 
         for x in range(self.grid_width):
             for y in range(self.grid_height):
@@ -55,7 +55,8 @@ class Renderer:
                 pygame.draw.rect(self.screen, color, rect)
 
     def get_color_from_height(self, height, min_height, max_height):
-        """Map a height value to one of five interval-based colors."""
+        """Map a height value to one of several interval-based colors using a single match block."""
+        # Handle the case where all heights are the same
         if max_height == min_height:
             return (34, 139, 34)  # Default to dark green if all heights are the same
 
@@ -69,17 +70,22 @@ class Renderer:
             max_height  # Max height
         ]
 
-        # Map the height to a color based on the interval
-        if height <= thresholds[0]:
-            return (0, 100, 0)  # Dark Green
-        elif height <= thresholds[1]:
-            return (34, 139, 34)  # Green
-        elif height <= thresholds[2]:
-            return (255, 255, 0)  # Yellow
-        elif height <= thresholds[3]:
-            return (210, 180, 140)  # Light Brown
-        else:
-            return (139, 69, 19)  # Brown
+        # Use a single match block to handle all cases
+        match height:
+            case -1:
+                return (0, 0, 139)  # Dark Blue for obstacles
+            case float('inf'):
+                return (128, 128, 128)  # Gray for impassable cells
+            case h if h <= thresholds[0]:
+                return (0, 100, 0)  # Dark Green
+            case h if h <= thresholds[1]:
+                return (34, 139, 34)  # Green
+            case h if h <= thresholds[2]:
+                return (255, 255, 0)  # Yellow
+            case h if h <= thresholds[3]:
+                return (210, 180, 140)  # Light Brown
+            case _:
+                return (139, 69, 19)  # Brown
 
     def draw_legend(self, grid_world):
         """Draw a legend explaining the height colors with number intervals."""
@@ -105,7 +111,17 @@ class Renderer:
             (255, 255, 0),  # Yellow
             (210, 180, 140),  # Light Brown
             (139, 69, 19),  # Brown
-            (0, 0, 139)     # Dark Blue for invalid heights
+            (0, 0, 139),    # Dark Blue for water
+            (128, 128, 128) # Gray for impassable cells
+        ]
+        legend_labels = [
+            f"{thresholds[0]:.1f} - {thresholds[1]:.1f}",
+            f"{thresholds[1]:.1f} - {thresholds[2]:.1f}",
+            f"{thresholds[2]:.1f} - {thresholds[3]:.1f}",
+            f"{thresholds[3]:.1f} - {thresholds[4]:.1f}",
+            f"{thresholds[4]:.1f} - {thresholds[5]:.1f}",
+            "Water",
+            "Impassable"
         ]
 
         # Calculate the size of the legend dynamically
@@ -126,21 +142,11 @@ class Renderer:
         pygame.draw.rect(self.screen, (240, 240, 240), (legend_x, legend_y, legend_width, legend_height))
 
         # Draw the legend items
-        for i in range(num_items):
+        for i, (color, label) in enumerate(zip(legend_colors, legend_labels)):
             rect_y = legend_y + margin + i * item_height  # Position of the color box
-            pygame.draw.rect(self.screen, legend_colors[i], (legend_x + margin, rect_y, 20, 20))  # Color box
-
-            # Format the interval as a string
-            interval_label = f"{thresholds[i]:.1f} - {thresholds[i + 1]:.1f}"
-            text_surface = font.render(interval_label, True, (0, 0, 0))  # Black text
+            pygame.draw.rect(self.screen, color, (legend_x + margin, rect_y, 20, 20))  # Color box
+            text_surface = font.render(label, True, (0, 0, 0))  # Black text
             self.screen.blit(text_surface, (legend_x + margin + 30, rect_y))  # Text next to the color box
-
-        # Add the invalid height description
-        invalid_y = legend_y + margin + num_items * item_height
-        pygame.draw.rect(self.screen, legend_colors[-1], (legend_x + margin, invalid_y, 20, 20))  # Dark blue box
-        invalid_label = "Invalid (-1)"
-        invalid_surface = font.render(invalid_label, True, (0, 0, 0))  # Black text
-        self.screen.blit(invalid_surface, (legend_x + margin + 30, invalid_y))  # Text next to the box
 
     def draw_agent(self, agent):
         # Draw start position
