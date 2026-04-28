@@ -1,79 +1,113 @@
 import heapq
+import queue
 import numpy as np
 
-class Node:
-    def __init__(self, position, parent=None):
-        self.position = position
-        self.parent = parent
-        self.g = 0  # Cost from start to current node
-        self.h = 0  # Heuristic cost to goal
-        self.f = 0  # Total cost
-
-    def __lt__(self, other):
-        return self.f < other.f
-
-def astar(start, goal, grid):
-    """
-    A* algorithm that incorporates height differences in the heuristic and cost.
+def bfs(start, goal, grid):
+    """Breadth-First Search algorithm for pathfinding on a grid.
     Args:
         start (tuple): Starting position (x, y).
         goal (tuple): Goal position (x, y).
         grid (np.ndarray): 2D grid representing the heights of the terrain.
-
     Returns:
-        list: The path from start to goal.
-        list: A list of steps for visualization (each step contains the current node, neighbors, and path).
+        dict: A dictionary mapping each visited node to its parent node, which can be used to reconstruct the path.
     """
-    open_list = []
-    closed_list = set()
-    start_node = Node(start)
-    goal_node = Node(goal)
-    heapq.heappush(open_list, start_node)
+    frontier = queue.Queue()
+    frontier.put(start)
+    came_from = {start: None}
 
-    while open_list:
-        current_node = heapq.heappop(open_list)
-        closed_list.add(current_node.position)
+    while not frontier.empty():
+        current = frontier.get()
 
-        if current_node.position == goal_node.position:
-            return reconstruct_path(current_node)
+        if current == goal:
+            break
 
-        neighbors = get_neighbors(current_node, grid)
-        for neighbor_position in neighbors:
-            if neighbor_position in closed_list:
-                continue
+        for next in grid.neighbors(current):
+            if next not in came_from:
+                frontier.put(next)
+                came_from[next] = current
 
-            neighbor_node = Node(neighbor_position, current_node)
-            neighbor_node.g = current_node.g + 1
-            neighbor_node.h = heuristic(neighbor_node.position, goal_node.position)
-            neighbor_node.f = neighbor_node.g + neighbor_node.h
+    return came_from
 
-            if add_to_open_list(open_list, neighbor_node):
-                heapq.heappush(open_list, neighbor_node)
+def dijsktra_search(start, goal, grid):
+    """Dijkstra's algorithm for pathfinding on a grid.
+    Args:
+        start (tuple): Starting position (x, y).
+        goal (tuple): Goal position (x, y).
+        grid (np.ndarray): 2D grid representing the heights of the terrain.
+    Returns:
+        dict: A dictionary mapping each visited node to its parent node, which can be used to reconstruct the path.
+    """
+    frontier = []
+    heapq.heappush(frontier, (0, start))
+    came_from = {start: None}
+    cost_so_far = {start: 0}
 
-    return None
+    while frontier:
+        cost, current = heapq.heappop(frontier)
 
-def get_neighbors(node, grid):
-    neighbors = []
-    directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]  # Up, Down, Left, Right
-    for direction in directions:
-        new_position = (node.position[0] + direction[0], node.position[1] + direction[1])
-        if 0 <= new_position[0] < len(grid) and 0 <= new_position[1] < len(grid[0]) and grid[new_position[0]][new_position[1]] == 0:
-            neighbors.append(new_position)
-    return neighbors
+        if current == goal:
+            break
 
-def heuristic(position, goal):
-    # Manhattan distance
-    return abs(position[0] - goal[0]) + abs(position[1] - goal[1])
+        for next in grid.neighbors(current):
+            new_cost = cost_so_far[current] + abs(grid.grid[next]-grid.grid[current])  # Cost is the height difference
+            if next not in cost_so_far or new_cost < cost_so_far[next]:
+                cost_so_far[next] = new_cost
+                priority = new_cost
+                heapq.heappush(frontier, (priority, next))
+                came_from[next] = current
 
-def add_to_open_list(open_list, neighbor):
-    for node in open_list:
-        if neighbor.position == node.position and neighbor.g >= node.g:
-            return False
-    return True
+    return came_from
 
-def reconstruct_path(node):
+def astar(start, goal, grid):
+    """A* search algorithm for pathfinding on a grid.
+    Args:
+        start (tuple): Starting position (x, y).
+        goal (tuple): Goal position (x, y).
+        grid (np.ndarray): 2D grid representing the heights of the terrain.
+    Returns:
+        dict: A dictionary mapping each visited node to its parent node, which can be used to reconstruct the path.
+    """
+    frontier = []
+    heapq.heappush(frontier, (0, start))
+    came_from = {start: None}
+    cost_so_far = {start: 0}
+
+    while frontier:
+        cost , current = heapq.heappop(frontier)
+
+        if current == goal:
+            break
+
+        for next in grid.neighbors(current):
+            new_cost = cost_so_far[current] + abs(grid.grid[next]-grid.grid[current])  # Cost is the height difference
+            if next not in cost_so_far or new_cost < cost_so_far[next]:
+                cost_so_far[next] = new_cost
+                priority = new_cost + heuristic(next, goal, grid)
+                heapq.heappush(frontier, (priority, next))
+                came_from[next] = current
+
+    return came_from
+
+def heuristic(a, b, grid):
+    """Heuristic function for A* search, using Manhattan distance.
+    Args:
+        a (tuple): Position (x, y) of the first point.
+        b (tuple): Position (x, y) of the second point.
+    Returns:
+        int: The Manhattan distance between points a and b plus the absolute height difference between the two points.
+    """
+    (a1, b1) = a
+    (a2, b2) = b
+    return abs(a1 - a2) + abs(b1 - b2) + abs(grid.grid[a] - grid.grid[b])
+
+def reconstruct_path(came_from, start, goal):
     path = []
-    while node:
-        path.append(node.position)
-        node = node.parent
-    return path[::-1]
+    current = goal
+    if current not in came_from:
+        return []
+    while current != start:
+        path.append(current)
+        current = came_from[current]
+    path.append(start)
+    path.reverse()
+    return path

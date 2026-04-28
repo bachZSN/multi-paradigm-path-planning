@@ -1,15 +1,17 @@
 import pygame
 
 class UIManager:
-    def __init__(self, screen, reset_world):
+    def __init__(self, screen, ui_action):
         self.screen = screen
-        self.reset_world = reset_world
+        self.ui_action = ui_action
         self.buttons = []
         self.margin = 50  # Preset margin for spacing
+        self.is_playing = False
         self.create_layout()
 
     def create_layout(self):
         screen_width = self.screen.get_width()
+        screen_height = self.screen.get_height()
 
         # Calculate dynamic button height and spacing
         button_width = 200
@@ -20,20 +22,19 @@ class UIManager:
         start_y = self.margin
 
         # Add algorithm buttons
-        self.add_button(screen_width - button_width - self.margin, start_y, button_width, button_height, (0, 128, 0), "A*", self.astar_action)
-        self.add_button(screen_width - button_width - self.margin, start_y + (button_height + spacing), button_width, button_height, (0, 128, 0), "Diffusion", self.diffusion_action)
-        self.add_button(screen_width - button_width - self.margin, start_y + 2 * (button_height + spacing), button_width, button_height, (0, 128, 0), "Hill Climb", self.hill_climbing_action)
+        self.add_button(screen_width - button_width - self.margin, start_y, button_width, button_height, (0, 128, 0), "A*", lambda: self.ui_action("A*"))
+        self.add_button(screen_width - button_width - self.margin, start_y + (button_height + spacing), button_width, button_height, (0, 128, 0), "Diffusion", lambda: self.ui_action("Diffusion"))
+        self.add_button(screen_width - button_width - self.margin, start_y + 2 * (button_height + spacing), button_width, button_height, (0, 128, 0), "Hill Climb", lambda: self.ui_action("Hill Climb"))
 
         # Add Reset and Quit buttons
-        self.add_button(screen_width - button_width - self.margin, start_y + 3 * (button_height + spacing), button_width, button_height, (128, 0, 0), "Reset", self.reset_action, hover_color=(150, 0, 0))
-        self.add_button(screen_width - button_width - self.margin, start_y + 4 * (button_height + spacing), button_width, button_height, (128, 0, 0), "Quit", self.quit_action, hover_color=(150, 0, 0))
+        self.add_button(screen_width - button_width - self.margin, start_y + 3 * (button_height + spacing), button_width, button_height, (128, 0, 0), "Reset", lambda: self.ui_action("Reset"), hover_color=(150, 0, 0))
+        self.add_button(screen_width - button_width - self.margin, start_y + 4 * (button_height + spacing), button_width, button_height, (128, 0, 0), "Quit", lambda: self.ui_action("Quit"), hover_color=(150, 0, 0))
 
         # Add control buttons with icons (repositioned to avoid overlap)
         icon_button_size = 50
-        self.add_icon_button(screen_width - button_width - self.margin - 2 * icon_button_size - 3 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), "<", self.backward_action)
-        self.add_icon_button(screen_width - button_width - self.margin - icon_button_size - 2 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), ">", self.forward_action)
-        self.add_icon_button(screen_width - button_width - self.margin - icon_button_size - 2 * spacing, start_y + 3 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), "▶", self.play_action)
-        self.add_icon_button(screen_width - button_width - self.margin - 2 * icon_button_size - 3 * spacing, start_y + 3 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), "||", self.pause_action)
+        self.add_icon_button(screen_width - button_width - self.margin - 2 * icon_button_size - 3 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), "<", lambda: self.ui_action("Backward"))
+        self.add_icon_button(screen_width - button_width - self.margin - icon_button_size - 2 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), ">", lambda: self.ui_action("Forward"))
+        self.add_icon_button(screen_width - button_width - self.margin - icon_button_size - 2 * spacing, start_y + 3 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), "▶", self.toggle_play_pause)
 
     def add_button(self, x, y, width, height, color, text, callback, hover_color=None):
         """Add a text-based button to the UI."""
@@ -83,38 +84,40 @@ class UIManager:
 
     def handle_event(self, event):
         """Handle events for the UI components."""
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:  # Left mouse button
-            for button in self.buttons:
-                if button["rect"].collidepoint(event.pos):
-                    button["callback"]()
+        match event.type:
+            case pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    for button in self.buttons:
+                        if button["rect"].collidepoint(event.pos):
+                            button["callback"]()
 
-    # Define actions for the algorithm buttons
-    def astar_action(self):
-        print("A* Algorithm selected!")
+            case pygame.KEYDOWN:
+                match event.key:
+                    case pygame.K_SPACE:
+                        self.toggle_play_pause()
+                    case pygame.K_RIGHT:
+                        self.ui_action("Forward")
+                    case pygame.K_LEFT:
+                        self.ui_action("Backward")
+                    case pygame.K_r:
+                        self.ui_action("Reset")
+                    case pygame.K_q:
+                        self.ui_action("Quit")
+                    case _:
+                        print(f"Unhandled key press: {pygame.key.name(event.key)}")
 
-    def diffusion_action(self):
-        print("Diffusion Algorithm selected!")
+            case pygame.QUIT:
+                pygame.quit()
+                exit()
 
-    def hill_climbing_action(self):
-        print("Hill Climbing Algorithm selected!")
+            case _:
+                pass
+                #print(f"Unhandled event: {event}")
 
-    # Define actions for the Reset and Quit buttons
-    def reset_action(self):
-        self.reset_world()
-
-    def quit_action(self):
-        pygame.quit()
-        exit()
-
-    # Define actions for the control buttons
-    def backward_action(self):
-        print("Step Backward")
-
-    def forward_action(self):
-        print("Step Forward")
-
-    def play_action(self):
-        print("Play")
-
-    def pause_action(self):
-        print("Pause")
+    def toggle_play_pause(self):
+        self.is_playing = not self.is_playing
+        for button in self.buttons:
+            if "icon" in button and button["icon"] in ["▶", "||"]:
+                button["icon"] = "||" if self.is_playing else "▶"
+                self.ui_action("Play" if self.is_playing else "Pause")
+                break

@@ -1,4 +1,7 @@
+from typing import Iterator
 import numpy as np
+GridLocation = tuple[int, int]
+
 """
 Grid world environment used across all planning paradigms.
 
@@ -11,9 +14,26 @@ class GridWorld:
         self.width = dimension
         self.height = dimension
         self.grid = np.zeros((self.width, self.height))
-        self.max_height = 0  # Cached max height
-        self.min_height = 0  # Cached min height
+        self.max_height = 0
+        self.min_height = 0
         self.update_heights()  # Initialize the cached values
+
+    def is_valid(self, id: GridLocation) -> bool:
+        return self.in_bounds(id) and self.passable(id)
+
+    def in_bounds(self, id: GridLocation) -> bool:
+        x, y = id
+        return 0 <= x < self.width and 0 <= y < self.height
+
+    def passable(self, id: GridLocation) -> bool:
+        x, y = id
+        return self.grid[x, y] >= 0 and self.grid[x, y] != float('inf')
+
+    def neighbors(self, id: GridLocation) -> Iterator[GridLocation]:
+        x, y = id
+        neighbors = [(x + dx, y + dy) for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]]
+        valid_neighbors = filter(self.is_valid, neighbors)
+        return valid_neighbors
 
     def update_heights(self):
         """Update the cached max and min heights."""
@@ -24,9 +44,6 @@ class GridWorld:
     def add_obstacle(self, x, y, height=1.0):
         self.grid[x, y] = height
         self.update_heights()
-
-    def is_valid(self, x, y):
-        return 0 <= x < self.width and 0 <= y < self.height and self.grid[x, y] >= 0 # -1 = invalid
 
     def add_mountain(self, x, y, height=1.0, radius=5, function="relu"):
         """
@@ -43,7 +60,7 @@ class GridWorld:
             for j in range(self.width):
                 # Calculate the distance from the summit
                 distance = np.sqrt((x - j) ** 2 + (y - i) ** 2)
-                if distance <= radius and self.is_valid(i, j):
+                if distance <= radius and self.is_valid((i, j)):
                     self.grid[i, j] += height * (1 - np.arctan(distance) / np.pi)
 
                 # Calculate the height based on the chosen function

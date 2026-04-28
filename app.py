@@ -14,21 +14,32 @@ class App:
         self.FPS = 60
         self.world = create_default_world()
         self.renderer = Renderer(self.world, self.screen)
-        self.ui_manager = UIManager(self.screen, self.reset_world)
+        self.ui_manager = UIManager(self.screen, self.ui_action)
+        self.path = None
+        self.agent = Agent(start=(5, 5), goal=(84, 69))
+        self.agents = [self.agent]
 
     def reset_world(self):
         self.world = create_default_world()
 
+    def ui_action(self, action_name):
+        match action_name:
+            case "A*":
+                self.path = astar(self.agent.start, self.agent.goal, self.world)
+                print ("A* Path found:", self.path)
+            case "Diffusion":
+                print ("Diffusion button clicked")
+            case "Hill Climb":
+                print ("Hill Climb button clicked")
+            case "Reset":
+                self.reset_world()
+            case "Quit":
+                pygame.quit()
+                exit()
+            case _:
+                print ("Unknown action:", action_name)
+
     def run(self):
-
-        # Create an agent
-        agent = Agent(start=(5, 5), goal=(84, 69))
-        agents = [agent]
-
-        # Run the A* algorithm
-        path = None
-        #path = astar(agent.start, agent.goal, grid)
-        #print("Path found:", path)
 
         running = True
         while running:
@@ -37,9 +48,9 @@ class App:
                     running = False
                 self.ui_manager.handle_event(event)
 
-            self.renderer.render_world(self.world, agents)
-            if path:
-                self.renderer.draw_path(path)
+            self.renderer.render_world(self.world, self.agents)
+            if self.path:
+                self.renderer.draw_path(self.path)
 
             self.ui_manager.draw_buttons()
 
