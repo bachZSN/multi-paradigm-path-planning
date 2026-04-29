@@ -7,6 +7,7 @@ class UIManager:
         self.buttons = []
         self.margin = 50  # Preset margin for spacing
         self.is_playing = False
+        self.is_showing_path = True
         self.create_layout()
 
     def create_layout(self):
@@ -27,14 +28,15 @@ class UIManager:
         self.add_button(screen_width - button_width - self.margin, start_y + 2 * (button_height + spacing), button_width, button_height, (0, 128, 0), "Hill Climb", lambda: self.ui_action("Hill Climb"))
 
         # Add Reset and Quit buttons
+        self.add_button(screen_width - 2* button_width - 2 * self.margin , start_y + 3 * (button_height + spacing), button_width, button_height, (128, 0, 0), "Toggle Path", self.toggle_show_path, hover_color=(150, 0, 0))
         self.add_button(screen_width - button_width - self.margin, start_y + 3 * (button_height + spacing), button_width, button_height, (128, 0, 0), "Reset", lambda: self.ui_action("Reset"), hover_color=(150, 0, 0))
         self.add_button(screen_width - button_width - self.margin, start_y + 4 * (button_height + spacing), button_width, button_height, (128, 0, 0), "Quit", lambda: self.ui_action("Quit"), hover_color=(150, 0, 0))
 
         # Add control buttons with icons (repositioned to avoid overlap)
         icon_button_size = 50
-        self.add_icon_button(screen_width - button_width - self.margin - 2 * icon_button_size - 3 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), "<", lambda: self.ui_action("Backward"))
-        self.add_icon_button(screen_width - button_width - self.margin - icon_button_size - 2 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), ">", lambda: self.ui_action("Forward"))
-        self.add_icon_button(screen_width - button_width - self.margin - icon_button_size - 2 * spacing, start_y + 3 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), "▶", self.toggle_play_pause)
+        self.add_icon_button(screen_width - button_width - self.margin - 3 * icon_button_size - 3 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), "<", lambda: self.ui_action("Backward"))
+        self.add_icon_button(screen_width - button_width - self.margin - 2 * icon_button_size - 2 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), ">", lambda: self.ui_action("Forward"))
+        self.add_icon_button(screen_width - button_width - self.margin - icon_button_size - 1 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), "►", self.toggle_play_pause)
 
     def add_button(self, x, y, width, height, color, text, callback, hover_color=None):
         """Add a text-based button to the UI."""
@@ -99,6 +101,8 @@ class UIManager:
                         self.ui_action("Forward")
                     case pygame.K_LEFT:
                         self.ui_action("Backward")
+                    case pygame.K_t:
+                        self.toggle_show_path()
                     case pygame.K_r:
                         self.ui_action("Reset")
                     case pygame.K_q:
@@ -117,7 +121,11 @@ class UIManager:
     def toggle_play_pause(self):
         self.is_playing = not self.is_playing
         for button in self.buttons:
-            if "icon" in button and button["icon"] in ["▶", "||"]:
-                button["icon"] = "||" if self.is_playing else "▶"
+            if "icon" in button and button["icon"] in ["►", "||"]:
+                button["icon"] = "||" if self.is_playing else "►"
                 self.ui_action("Play" if self.is_playing else "Pause")
                 break
+
+    def toggle_show_path(self):
+        self.is_showing_path = not self.is_showing_path
+        self.ui_action("Toggle Path")

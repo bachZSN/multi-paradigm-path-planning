@@ -16,6 +16,7 @@ class App:
         self.renderer = Renderer(self.world, self.screen)
         self.ui_manager = UIManager(self.screen, self.ui_action)
         self.path = None
+        self.show_path = True
         self.agent = Agent(start=(5, 5), goal=(84, 69))
         self.agents = [self.agent]
 
@@ -26,11 +27,12 @@ class App:
         match action_name:
             case "A*":
                 self.path = astar(self.agent.start, self.agent.goal, self.world)
-                print ("A* Path found:", self.path)
             case "Diffusion":
                 print ("Diffusion button clicked")
             case "Hill Climb":
                 print ("Hill Climb button clicked")
+            case "Toggle Path":
+                self.show_path = not self.show_path
             case "Reset":
                 self.reset_world()
             case "Quit":
@@ -49,7 +51,7 @@ class App:
                 self.ui_manager.handle_event(event)
 
             self.renderer.render_world(self.world, self.agents)
-            if self.path:
+            if self.path and self.show_path:
                 self.renderer.draw_path(self.path)
 
             self.ui_manager.draw_buttons()
