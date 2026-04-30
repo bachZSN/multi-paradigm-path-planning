@@ -167,12 +167,22 @@ class Renderer:
         )
         pygame.draw.rect(self.screen, (255, 0, 0), goal_rect)
 
-    def draw_path(self, path):
-        for position in path:
+    def draw_path(self, explored_path, shortest_path):
+
+        #for position in explored_path:
+        #    rect = pygame.Rect(
+        #        self.render_area.x + position[0] * self.cell_size,  # Offset by render_area.x
+        #        self.render_area.y + position[1] * self.cell_size,  # Offset by render_area.y
+        #        self.cell_size,
+        #        self.cell_size
+        #    )
+        #    pygame.draw.rect(self.screen, (255, 182, 193), rect)
+
+        for position in shortest_path:
             rect = pygame.Rect(
                 self.render_area.x + position[0] * self.cell_size,  # Offset by render_area.x
                 self.render_area.y + position[1] * self.cell_size,  # Offset by render_area.y
                 self.cell_size,
                 self.cell_size
             )
-            pygame.draw.rect(self.screen, (0, 0, 255), rect)  # Blue for the path
+            pygame.draw.rect(self.screen, (255, 100, 100), rect)

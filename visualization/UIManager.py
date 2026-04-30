@@ -95,6 +95,12 @@ class UIManager:
 
             case pygame.KEYDOWN:
                 match event.key:
+                    case pygame.K_1:
+                        self.ui_action("A*")
+                    case pygame.K_2:
+                        self.ui_action("Diffusion")
+                    case pygame.K_3:
+                        self.ui_action("Hill Climb")
                     case pygame.K_SPACE:
                         self.toggle_play_pause()
                     case pygame.K_RIGHT:

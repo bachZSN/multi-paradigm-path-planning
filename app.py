@@ -2,7 +2,7 @@ import pygame
 from environments.grid_world import Agent, create_default_world
 from visualization.UIManager import UIManager
 from visualization.renderer import Renderer
-from algorithms.astar import astar
+from algorithms.astar import astar, dijsktra_search, bfs
 
 class App:
     def __init__(self):
@@ -15,7 +15,8 @@ class App:
         self.world = create_default_world()
         self.renderer = Renderer(self.world, self.screen)
         self.ui_manager = UIManager(self.screen, self.ui_action)
-        self.path = None
+        self.explored_path = None
+        self.shortest_path = None
         self.show_path = True
         self.agent = Agent(start=(5, 5), goal=(84, 69))
         self.agents = [self.agent]
@@ -26,10 +27,12 @@ class App:
     def ui_action(self, action_name):
         match action_name:
             case "A*":
-                self.path = astar(self.agent.start, self.agent.goal, self.world)
+                self.explored_path, self.shortest_path = astar(self.agent.start, self.agent.goal, self.world)
             case "Diffusion":
                 print ("Diffusion button clicked")
+                self.explored_path, self.shortest_path = dijsktra_search(self.agent.start, self.agent.goal, self.world)
             case "Hill Climb":
+                self.explored_path, self.shortest_path = bfs(self.agent.start, self.agent.goal, self.world)
                 print ("Hill Climb button clicked")
             case "Toggle Path":
                 self.show_path = not self.show_path
@@ -51,8 +54,8 @@ class App:
                 self.ui_manager.handle_event(event)
 
             self.renderer.render_world(self.world, self.agents)
-            if self.path and self.show_path:
-                self.renderer.draw_path(self.path)
+            if (self.explored_path or self.shortest_path) and self.show_path:
+                self.renderer.draw_path(self.explored_path, self.shortest_path)
 
             self.ui_manager.draw_buttons()
 

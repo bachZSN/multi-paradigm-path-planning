@@ -26,7 +26,7 @@ def bfs(start, goal, grid):
                 frontier.put(next)
                 came_from[next] = current
 
-    return came_from
+    return came_from, reconstruct_path(came_from, start, goal)
 
 def dijsktra_search(start, goal, grid):
     """Dijkstra's algorithm for pathfinding on a grid.
@@ -56,7 +56,7 @@ def dijsktra_search(start, goal, grid):
                 heapq.heappush(frontier, (priority, next))
                 came_from[next] = current
 
-    return came_from
+    return came_from, reconstruct_path(came_from, start, goal)
 
 def astar(start, goal, grid):
     """A* search algorithm for pathfinding on a grid.
@@ -86,7 +86,9 @@ def astar(start, goal, grid):
                 heapq.heappush(frontier, (priority, next))
                 came_from[next] = current
 
-    return came_from
+
+
+    return came_from, reconstruct_path(came_from, start, goal)
 
 def heuristic(a, b, grid):
     """Heuristic function for A* search, using Manhattan distance.
