@@ -2,7 +2,7 @@ import pygame
 from environments.grid_world import Agent, create_default_world
 from visualization.UIManager import UIManager
 from visualization.renderer import Renderer
-from algorithms.astar import astar, dijsktra_search, bfs
+from algorithms.astar import astar, dijsktra_search, bfs, calculate_total_cost
 
 class App:
     def __init__(self):
@@ -56,6 +56,7 @@ class App:
             self.renderer.render_world(self.world, self.agents)
             if (self.explored_path or self.shortest_path) and self.show_path:
                 self.renderer.draw_path(self.explored_path, self.shortest_path)
+                self.renderer.draw_cost(calculate_total_cost(self.shortest_path, self.world))
 
             self.ui_manager.draw_buttons()
 

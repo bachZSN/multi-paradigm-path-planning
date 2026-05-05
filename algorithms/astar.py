@@ -88,8 +88,6 @@ def astar(start, goal, grid):
                 heapq.heappush(frontier, (priority, next))
                 came_from[next] = current
 
-
-
     return came_from, reconstruct_path(came_from, start, goal)
 
 def heuristic(a, b, grid):
@@ -115,3 +113,24 @@ def reconstruct_path(came_from, start, goal):
     path.append(start)
     path.reverse()
     return path
+
+def calculate_total_cost(path, grid):
+    """Calculate the total cost of a path based on height differences.
+    Args:
+        path (list): A list of positions (x, y) representing the path.
+        grid (np.ndarray): 2D grid representing the heights of the terrain.
+    Returns:
+        int: The total cost of the path based on height differences.
+    """
+    if len(path) < 2:
+        return 0  # No cost for a path with fewer than 2 points
+
+    cost_move_dir = 1  # Base cost to move to a neighbor (can be adjusted based on terrain)
+
+    # Use sum with a generator expression for consecutive pairs
+    total_cost = sum(
+        cost_move_dir + abs(grid.grid[next_pos[1], next_pos[0]] - grid.grid[current[1], current[0]])
+        for current, next_pos in zip(path, path[1:])
+    )
+
+    return total_cost

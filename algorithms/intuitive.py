@@ -11,29 +11,4 @@ def intuitive(self, start, goal, grid):
     #generally we tend to prefer paths that point to the goal, but we also want to avoid steep climbs if possible
     #but we have some sort of limited vision and we can only see a certain radius around us, so we will use a heuristic that considers the height differences in that radius and the direction towards the goal
     #certain height differences might be more acceptable if they are in the direction of the goal, while others might be less acceptable if they are in the opposite direction
-    #for a different approach we can simlulate human instinct to climb a higher place to ascertain the terrain, then deciding on a path
-
-    frontier = []
-    heapq.heappush(frontier, (0, start))
-    came_from = {start: None}
-    cost_so_far = {start: 0}
-
-    while frontier:
-        cost, current = heapq.heappop(frontier)
-
-        if current == goal:
-            break
-
-        for next in grid.neighbors(current):
-            # Calculate the intuitive cost based on direction and height difference
-            direction_cost = self.direction_cost(current, next, goal)
-            height_cost = abs(grid.grid[next] - grid.grid[current])
-            new_cost = cost_so_far[current] + direction_cost + height_cost
-
-            if next not in cost_so_far or new_cost < cost_so_far[next]:
-                cost_so_far[next] = new_cost
-                priority = new_cost
-                heapq.heappush(frontier, (priority, next))
-                came_from[next] = current
-
-    return came_from, self.reconstruct_path(came_from, start, goal)
+    #as for the decision on when to look ahead when to follow the path with lower height difference when to pause and try to calculate a better heuristic I want to train a model that can learn from experience when to do what, but for now we will just use a simple rule based approach where we look ahead if we are at a certain distance from the goal or if we encounter a certain height difference

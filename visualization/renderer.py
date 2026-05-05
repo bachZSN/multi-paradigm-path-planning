@@ -196,3 +196,9 @@ class Renderer:
                 self.cell_size
             )
             pygame.draw.rect(self.screen, (255, 100, 100), rect)  # Full opacity red color
+
+    def draw_cost(self, cost):
+        """Draw the total cost of the path on the screen."""
+        font = pygame.font.Font(None, 36)
+        text_surface = font.render(f"Total Cost: {cost:.2f}", True, (0, 0, 0))
+        self.screen.blit(text_surface, (self.margin, self.screen.get_height() - self.margin - 30))
