@@ -168,21 +168,31 @@ class Renderer:
         pygame.draw.rect(self.screen, (255, 0, 0), goal_rect)
 
     def draw_path(self, explored_path, shortest_path):
+        """Draw the explored path with reduced opacity and the shortest path with full opacity."""
 
-        #for position in explored_path:
-        #    rect = pygame.Rect(
-        #        self.render_area.x + position[0] * self.cell_size,  # Offset by render_area.x
-        #        self.render_area.y + position[1] * self.cell_size,  # Offset by render_area.y
-        #        self.cell_size,
-        #        self.cell_size
-        #    )
-        #    pygame.draw.rect(self.screen, (255, 182, 193), rect)
+        # Create a semi-transparent surface for the explored path
+        explored_surface = pygame.Surface((self.render_area.width, self.render_area.height), pygame.SRCALPHA)
+        explored_surface.fill((0, 0, 0, 0))  # Fully transparent background
 
-        for position in shortest_path:
+        # Draw explored path with reduced opacity (e.g., 50% alpha)
+        for position in explored_path:
             rect = pygame.Rect(
-                self.render_area.x + position[0] * self.cell_size,  # Offset by render_area.x
-                self.render_area.y + position[1] * self.cell_size,  # Offset by render_area.y
+                (position[0] - self.render_area.x // self.cell_size) * self.cell_size,
+                (position[1] - self.render_area.y // self.cell_size) * self.cell_size,
                 self.cell_size,
                 self.cell_size
             )
-            pygame.draw.rect(self.screen, (255, 100, 100), rect)
+            pygame.draw.rect(explored_surface, (255, 182, 193, 128), rect)  # Semi-transparent rose color
+
+        # Blit the explored surface onto the main screen
+        self.screen.blit(explored_surface, (self.render_area.x, self.render_area.y))
+
+        # Draw the shortest path with full opacity on top
+        for position in shortest_path:
+            rect = pygame.Rect(
+                self.render_area.x + position[0] * self.cell_size,
+                self.render_area.y + position[1] * self.cell_size,
+                self.cell_size,
+                self.cell_size
+            )
+            pygame.draw.rect(self.screen, (255, 100, 100), rect)  # Full opacity red color

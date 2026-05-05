@@ -71,6 +71,7 @@ def astar(start, goal, grid):
     heapq.heappush(frontier, (0, start))
     came_from = {start: None}
     cost_so_far = {start: 0}
+    cost_move_dir = 1  # Base cost to move to a neighbor (can be adjusted based on terrain)
 
     while frontier:
         cost , current = heapq.heappop(frontier)
@@ -79,7 +80,7 @@ def astar(start, goal, grid):
             break
 
         for next in grid.neighbors(current):
-            new_cost = cost_so_far[current] + abs(grid.grid[next]-grid.grid[current])  # Cost is the height difference
+            new_cost = cost_so_far[current] + cost_move_dir + abs(grid.grid[next]-grid.grid[current])  # Cost is the height difference
             if next not in cost_so_far or new_cost < cost_so_far[next]:
                 cost_so_far[next] = new_cost
                 priority = new_cost + heuristic(next, goal, grid)
