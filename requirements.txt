@@ -10,3 +10,6 @@ pygame==2.6.1
 pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 six==1.17.0
+torch==2.7.1
+torchvision==0.15.2
+torchaudio==2.7.2

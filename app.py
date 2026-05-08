@@ -15,6 +15,8 @@ class App:
         self.world = create_default_world()
         self.renderer = Renderer(self.world, self.screen)
         self.ui_manager = UIManager(self.screen, self.ui_action)
+        self.current_cost = None
+        self.total_cost = None
         self.explored_path = None
         self.shortest_path = None
         self.show_path = True
@@ -23,6 +25,11 @@ class App:
 
     def reset_world(self):
         self.world = create_default_world()
+        self.current_cost = None
+        self.total_cost = 0
+        self.explored_path = None
+        self.shortest_path = None
+
 
     def ui_action(self, action_name):
         match action_name:

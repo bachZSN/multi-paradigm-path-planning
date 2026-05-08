@@ -169,6 +169,8 @@ class Renderer:
 
     def draw_path(self, explored_path, shortest_path):
         """Draw the explored path with reduced opacity and the shortest path with full opacity."""
+        if not explored_path or not shortest_path:
+            return  # No paths to draw
 
         # Create a semi-transparent surface for the explored path
         explored_surface = pygame.Surface((self.render_area.width, self.render_area.height), pygame.SRCALPHA)
@@ -177,8 +179,8 @@ class Renderer:
         # Draw explored path with reduced opacity (e.g., 50% alpha)
         for position in explored_path:
             rect = pygame.Rect(
-                (position[0] - self.render_area.x // self.cell_size) * self.cell_size,
-                (position[1] - self.render_area.y // self.cell_size) * self.cell_size,
+                self.render_area.x + position[0] * self.cell_size,
+                self.render_area.y + position[1] * self.cell_size,
                 self.cell_size,
                 self.cell_size
             )
@@ -199,6 +201,8 @@ class Renderer:
 
     def draw_cost(self, cost):
         """Draw the total cost of the path on the screen."""
+        if cost is None:
+            return
         font = pygame.font.Font(None, 36)
         text_surface = font.render(f"Total Cost: {cost:.2f}", True, (0, 0, 0))
         self.screen.blit(text_surface, (self.margin, self.screen.get_height() - self.margin - 30))
