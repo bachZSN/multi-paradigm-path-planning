@@ -13,7 +13,7 @@ class GridWorld:
     def __init__(self, dimension: int):
         self.width = dimension
         self.height = dimension
-        self.grid = np.zeros((self.width, self.height))
+        self.grid = np.zeros((self.width, self.height),dtype=int)
         self.max_height = 0
         self.min_height = 0
         self.update_heights()  # Initialize the cached values
@@ -41,11 +41,11 @@ class GridWorld:
         self.max_height = valid_heights.max() if valid_heights.size > 0 else 0
         self.min_height = valid_heights.min() if valid_heights.size > 0 else 0
 
-    def add_obstacle(self, x, y, height=1.0):
+    def add_obstacle(self, x, y, height=1):
         self.grid[x, y] = height
         self.update_heights()
 
-    def add_mountain(self, x, y, height=1.0, radius=5, function="relu"):
+    def add_mountain(self, x, y, height=1, radius=5, function="relu"):
         """
         Add a mountain with a summit at (x, y) and gradually decreasing height.
 
