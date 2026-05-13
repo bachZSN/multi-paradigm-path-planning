@@ -33,7 +33,7 @@ def dijsktra_search(start, goal, grid):
     Args:
         start (tuple): Starting position (x, y).
         goal (tuple): Goal position (x, y).
-        grid (np.ndarray): 2D grid representing the heights of the terrain.
+        grid (GridWorld): consiting the grid attribute (np.ndarray) 2D grid representing the heights of the terrain.
     Returns:
         dict: A dictionary mapping each visited node to its parent node, which can be used to reconstruct the path.
     """
@@ -50,7 +50,7 @@ def dijsktra_search(start, goal, grid):
             break
 
         for next in grid.neighbors(current):
-            new_cost = cost_so_far[current] + cost_move_dir + abs(grid.grid[next]-grid.grid[current])  # Cost is the height difference
+            new_cost = cost_so_far[current] + cost_move_dir + abs(grid.grid[next[1],next[0]]-grid.grid[current[1],current[0]])  # Cost is the height difference
             if next not in cost_so_far or new_cost < cost_so_far[next]:
                 cost_so_far[next] = new_cost
                 priority = new_cost
@@ -81,7 +81,7 @@ def astar(start, goal, grid):
             break
 
         for next in grid.neighbors(current):
-            new_cost = cost_so_far[current] + cost_move_dir + abs(grid.grid[next]-grid.grid[current])  # Cost is the height difference
+            new_cost = cost_so_far[current] + cost_move_dir + abs(grid.grid[next[1],next[0]]-grid.grid[current[1],current[0]])  # Cost is the height difference
             if next not in cost_so_far or new_cost < cost_so_far[next]:
                 cost_so_far[next] = new_cost
                 priority = new_cost + heuristic(next, goal, grid)
@@ -100,7 +100,7 @@ def heuristic(a, b, grid):
     """
     (a1, b1) = a
     (a2, b2) = b
-    return abs(a1 - a2) + abs(b1 - b2) + abs(grid.grid[a] - grid.grid[b])
+    return abs(a1 - a2) + abs(b1 - b2) # + abs(grid.grid[a] - grid.grid[b]) this would destroy admissability of the heuristic, so we will not include it
 
 def reconstruct_path(came_from, start, goal):
     path = []

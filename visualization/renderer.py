@@ -179,8 +179,8 @@ class Renderer:
         # Draw explored path with reduced opacity (e.g., 50% alpha)
         for position in explored_path:
             rect = pygame.Rect(
-                self.render_area.x + position[0] * self.cell_size,
-                self.render_area.y + position[1] * self.cell_size,
+                position[0] * self.cell_size,
+                position[1] * self.cell_size,
                 self.cell_size,
                 self.cell_size
             )
@@ -200,9 +200,23 @@ class Renderer:
             pygame.draw.rect(self.screen, (255, 100, 100), rect)  # Full opacity red color
 
     def draw_cost(self, cost):
-        """Draw the total cost of the path on the screen."""
+        """Draw the total cost below the legend, clearing the previous text."""
         if cost is None:
-            return
+            return  # Don't draw if no cost
+
+        # Position below the legend
+        legend_x = self.render_area.right + self.margin
+        button_height = 80
+        legend_y = 100 + 3 * (button_height) + self.margin  # Below legend height + margin
+
+        # Clear the area where the cost text will be drawn
+        text_width = 200  # Approximate width of the text area
+        text_height = 40  # Approximate height of the text area
+        clear_rect = pygame.Rect(legend_x, legend_y, text_width, text_height)
+        pygame.draw.rect(self.screen, (255, 255, 255), clear_rect)  # Fill with background color
+
+        # Draw cost text
         font = pygame.font.Font(None, 36)
-        text_surface = font.render(f"Total Cost: {cost:.2f}", True, (0, 0, 0))
-        self.screen.blit(text_surface, (self.margin, self.screen.get_height() - self.margin - 30))
+        cost_text = f"Total Cost: {cost}"
+        text_surface = font.render(cost_text, True, (0, 0, 0))  # Black text
+        self.screen.blit(text_surface, (legend_x, legend_y))

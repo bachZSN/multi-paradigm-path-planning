@@ -2,7 +2,7 @@ import numpy as np
 import heapq
 import torch
 
-def intuitive(self, start, goal, grid):
+def intuitive(start, goal, grid):
     """Intuitive search algorithm that prioritizes moving towards the goal while considering height differences. This algorithm is not guaranteed to find the optimal path, but it can be faster in certain scenarios."""
 
     #we will simulate a human walking through terrain by always trying to move towards the goal, but also considering the height differences. We will use a priority queue to explore nodes that are closer to the goal and have lower height differences first.
