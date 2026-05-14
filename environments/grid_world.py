@@ -13,7 +13,7 @@ class GridWorld:
     def __init__(self, dimension: int):
         self.width = dimension
         self.height = dimension
-        self.grid = np.zeros((self.width, self.height),dtype=int)
+        self.grid = np.zeros((self.height, self.width), dtype=np.float64)
         self.max_height = 0
         self.min_height = 0
         self.update_heights()  # Initialize the cached values
@@ -27,7 +27,8 @@ class GridWorld:
 
     def passable(self, id: GridLocation) -> bool:
         x, y = id
-        return self.grid[x, y] >= 0 and self.grid[x, y] != float('inf')
+        val = self.grid[y, x]
+        return val >= 0 and not np.isinf(val)
 
     def neighbors(self, id: GridLocation) -> Iterator[GridLocation]:
         x, y = id
@@ -42,32 +43,18 @@ class GridWorld:
         self.min_height = valid_heights.min() if valid_heights.size > 0 else 0
 
     def add_obstacle(self, x, y, height=1):
-        self.grid[x, y] = height
+        self.grid[y, x] = height
         self.update_heights()
 
     def add_mountain(self, x, y, height=1, radius=5, function="relu"):
-        """
-        Add a mountain with a summit at (x, y) and gradually decreasing height.
-
-        Args:
-            x (int): X-coordinate of the summit.
-            y (int): Y-coordinate of the summit.
-            height (float): Maximum height at the summit.
-            radius (int): Radius of the mountain's influence.
-            function (str): The function to use for height decay ("relu" or "arctan").
-        """
-        for i in range(self.height):
-            for j in range(self.width):
-                # Calculate the distance from the summit
-                distance = np.sqrt((x - j) ** 2 + (y - i) ** 2)
-                if distance <= radius and self.is_valid((i, j)):
-                    self.grid[i, j] += height * (1 - np.arctan(distance) / np.pi)
-
-                # Calculate the height based on the chosen function
+        for row in range(self.height):
+            for col in range(self.width):
+                distance = np.sqrt((x - col) ** 2 + (y - row) ** 2)
+                if distance <= radius and self.is_valid((col, row)):
                     if function == "relu":
-                        self.grid[i, j] += max(0, height * (1 - distance / radius))
+                        self.grid[row, col] += max(0, height * (1 - distance / radius))
                     elif function == "arctan":
-                        self.grid[i, j] += height * (1 - np.arctan(distance) / np.pi)
+                        self.grid[row, col] += height * (1 - np.arctan(distance) / np.pi)
         self.update_heights()
 
 def create_default_world():

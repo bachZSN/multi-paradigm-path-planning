@@ -37,3 +37,7 @@ dist-newstyle/
 # experiment results
 experiments/results/*
 !experiments/results/.keep
+
+# Dataset files (generated at runtime)
+/data/*
+!/data/.gitkeep

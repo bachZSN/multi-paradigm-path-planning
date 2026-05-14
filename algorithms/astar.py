@@ -7,9 +7,9 @@ def bfs(start, goal, grid):
     Args:
         start (tuple): Starting position (x, y).
         goal (tuple): Goal position (x, y).
-        grid (np.ndarray): 2D grid representing the heights of the terrain.
+        grid (GridWorld): the grid world containing terrain and validity checks.
     Returns:
-        dict: A dictionary mapping each visited node to its parent node, which can be used to reconstruct the path.
+        tuple: (came_from, path) where came_from is the parent map and path is the reconstructed path.
     """
     frontier = queue.Queue()
     frontier.put(start)
@@ -28,14 +28,14 @@ def bfs(start, goal, grid):
 
     return came_from, reconstruct_path(came_from, start, goal)
 
-def dijsktra_search(start, goal, grid):
+def dijkstra_search(start, goal, grid):
     """Dijkstra's algorithm for pathfinding on a grid.
     Args:
         start (tuple): Starting position (x, y).
         goal (tuple): Goal position (x, y).
-        grid (GridWorld): consiting the grid attribute (np.ndarray) 2D grid representing the heights of the terrain.
+        grid (GridWorld): the grid world containing terrain and validity checks.
     Returns:
-        dict: A dictionary mapping each visited node to its parent node, which can be used to reconstruct the path.
+        tuple: (came_from, path) where came_from is the parent map and path is the reconstructed path.
     """
     frontier = []
     heapq.heappush(frontier, (0, start))
@@ -64,9 +64,9 @@ def astar(start, goal, grid):
     Args:
         start (tuple): Starting position (x, y).
         goal (tuple): Goal position (x, y).
-        grid (np.ndarray): 2D grid representing the heights of the terrain.
+        grid (GridWorld): the grid world containing terrain and validity checks.
     Returns:
-        dict: A dictionary mapping each visited node to its parent node, which can be used to reconstruct the path.
+        tuple: (came_from, path) where came_from is the parent map and path is the reconstructed path.
     """
     frontier = []
     heapq.heappush(frontier, (0, start))
@@ -91,16 +91,10 @@ def astar(start, goal, grid):
     return came_from, reconstruct_path(came_from, start, goal)
 
 def heuristic(a, b, grid):
-    """Heuristic function for A* search, using Manhattan distance.
-    Args:
-        a (tuple): Position (x, y) of the first point.
-        b (tuple): Position (x, y) of the second point.
-    Returns:
-        int: The Manhattan distance between points a and b plus the absolute height difference between the two points.
-    """
+    """Manhattan distance heuristic (admissible for 4-directional movement)."""
     (a1, b1) = a
     (a2, b2) = b
-    return abs(a1 - a2) + abs(b1 - b2) # + abs(grid.grid[a] - grid.grid[b]) this would destroy admissability of the heuristic, so we will not include it
+    return abs(a1 - a2) + abs(b1 - b2)
 
 def reconstruct_path(came_from, start, goal):
     path = []
@@ -115,12 +109,12 @@ def reconstruct_path(came_from, start, goal):
     return path
 
 def calculate_total_cost(path, grid):
-    """Calculate the total cost of a path based on height differences.
+    """Calculate the total cost of a path (movement cost + height differences).
     Args:
-        path (list): A list of positions (x, y) representing the path.
-        grid (np.ndarray): 2D grid representing the heights of the terrain.
+        path (list): A list of (x, y) positions along the path.
+        grid (GridWorld): the grid world containing terrain heights.
     Returns:
-        int: The total cost of the path based on height differences.
+        float: Total traversal cost.
     """
     if len(path) < 2:
         return 0  # No cost for a path with fewer than 2 points

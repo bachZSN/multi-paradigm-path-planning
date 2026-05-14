@@ -2,7 +2,7 @@ import pygame
 from environments.grid_world import Agent, create_default_world
 from visualization.UIManager import UIManager
 from visualization.renderer import Renderer
-from algorithms.astar import astar, dijsktra_search, bfs, calculate_total_cost
+from algorithms.astar import astar, dijkstra_search, bfs, calculate_total_cost
 
 class App:
     def __init__(self):
@@ -37,7 +37,7 @@ class App:
                 self.explored_path, self.shortest_path = astar(self.agent.start, self.agent.goal, self.world)
             case "Diffusion":
                 print ("Diffusion button clicked")
-                self.explored_path, self.shortest_path = dijsktra_search(self.agent.start, self.agent.goal, self.world)
+                self.explored_path, self.shortest_path = dijkstra_search(self.agent.start, self.agent.goal, self.world)
             case "Hill Climb":
                 self.explored_path, self.shortest_path = bfs(self.agent.start, self.agent.goal, self.world)
                 print ("Hill Climb button clicked")
