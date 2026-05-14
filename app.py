@@ -1,8 +1,11 @@
+import os
+import torch
 import pygame
 from environments.grid_world import Agent, create_default_world
 from visualization.UIManager import UIManager
 from visualization.renderer import Renderer
 from algorithms.astar import astar, dijkstra_search, bfs, calculate_total_cost
+from algorithms.diffusion import PathUNet, infer_path
 
 class App:
     def __init__(self):
@@ -36,8 +39,18 @@ class App:
             case "A*":
                 self.explored_path, self.shortest_path = astar(self.agent.start, self.agent.goal, self.world)
             case "Diffusion":
-                print ("Diffusion button clicked")
-                self.explored_path, self.shortest_path = dijkstra_search(self.agent.start, self.agent.goal, self.world)
+                print ("Running trained diffusion model ...")
+                ckpt = "data/diffusion_model.pt"
+                if not os.path.exists(ckpt):
+                    print(f"  No checkpoint found at {ckpt}. Train one with: python -m experiments.train_diffusion")
+                    return
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model = PathUNet(in_channels=4, out_channels=1, time_dim=256)
+                explored, shortest = infer_path(model, self.world, self.agent.start,
+                                                self.agent.goal, checkpoint=ckpt, device=device)
+                self.explored_path = explored if explored else None
+                self.shortest_path = shortest if shortest else None
+                print(f"  Diffusion path found: {len(self.shortest_path) if self.shortest_path else 0} waypoints")
             case "Hill Climb":
                 self.explored_path, self.shortest_path = bfs(self.agent.start, self.agent.goal, self.world)
                 print ("Hill Climb button clicked")

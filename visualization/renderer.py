@@ -217,6 +217,6 @@ class Renderer:
 
         # Draw cost text
         font = pygame.font.Font(None, 36)
-        cost_text = f"Total Cost: {cost}"
+        cost_text = f"Total Cost: {cost:.1f}"
         text_surface = font.render(cost_text, True, (0, 0, 0))  # Black text
         self.screen.blit(text_surface, (legend_x, legend_y))

@@ -3,119 +3,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Sequence
-
-
-# ---------------------------------------------------------------------------
-# Dataset: run A* on GridWorld to create (elevation, start, goal, path) pairs
-# ---------------------------------------------------------------------------
-
-class PathfindingDataset(torch.utils.data.Dataset):
-    """
-    Stores pathfinding problems as grid-based channels:
-      - elevation [1, H, W] : terrain height map (normalized)
-      - start_map [1, H, W] : one-hot-ish gaussian blob at start position
-      - goal_map  [1, H, W] : one-hot-ish gaussian blob at goal position
-      - path_map  [1, H, W] : binary occupancy of the optimal A* path
-    """
-    def __init__(self, elevation_grids: Sequence[np.ndarray],
-                 start_positions: Sequence[tuple[int, int]],
-                 goal_positions: Sequence[tuple[int, int]],
-                 path_grids: Sequence[np.ndarray]):
-        self.elevation = [g.astype(np.float32) for g in elevation_grids]
-        self.starts = start_positions
-        self.goals = goal_positions
-        self.paths = [p.astype(np.float32) for p in path_grids]
-        self.H, self.W = self.elevation[0].shape
-
-    def __len__(self):
-        return len(self.elevation)
-
-    def __getitem__(self, idx):
-        elev = torch.from_numpy(self.elevation[idx]).unsqueeze(0)
-        path = torch.from_numpy(self.paths[idx]).unsqueeze(0)
-
-        # normalize elevation to [0, 1] per map
-        if elev.max() > 0:
-            elev = elev / elev.max()
-
-        # build start/goal heatmaps (gaussian blob at the position)
-        start_map = self._position_heatmap(self.starts[idx])
-        goal_map = self._position_heatmap(self.goals[idx])
-
-        elev, path, start_map, goal_map = self.augment(elev, path, start_map, goal_map)
-        return elev, start_map, goal_map, path
-
-    def _position_heatmap(self, pos: tuple[int, int], sigma: float = 1.5) -> torch.Tensor:
-        ys, xs = torch.meshgrid(
-            torch.arange(self.H, dtype=torch.float32),
-            torch.arange(self.W, dtype=torch.float32),
-            indexing="ij",
-        )
-        dist2 = (xs - pos[0]) ** 2 + (ys - pos[1]) ** 2
-        heat = torch.exp(-dist2 / (2 * sigma ** 2))
-        return heat.unsqueeze(0)
-
-    def augment(self, elev, path, start_map, goal_map):
-        k = np.random.randint(0, 4)
-        elev = torch.rot90(elev, k, dims=[-2, -1])
-        path = torch.rot90(path, k, dims=[-2, -1])
-        start_map = torch.rot90(start_map, k, dims=[-2, -1])
-        goal_map = torch.rot90(goal_map, k, dims=[-2, -1])
-
-        if np.random.rand() > 0.5:
-            elev = torch.flip(elev, dims=[-1])
-            path = torch.flip(path, dims=[-1])
-            start_map = torch.flip(start_map, dims=[-1])
-            goal_map = torch.flip(goal_map, dims=[-1])
-
-        return elev, path, start_map, goal_map
-
-
-# ---------------------------------------------------------------------------
-# Dataset generation using A*
-# ---------------------------------------------------------------------------
-
-def generate_dataset(
-    world_size: int = 32,
-    num_worlds: int = 500,
-    num_obstacles: int = 8,
-    seed: int = 42,
-) -> PathfindingDataset:
-    from algorithms.astar import astar
-    from environments.grid_world import GridWorld
-
-    rng = np.random.RandomState(seed)
-    elevations, starts, goals, paths = [], [], [], []
-
-    for _ in range(num_worlds):
-        world = GridWorld(world_size)
-        for _ in range(num_obstacles):
-            x = int(rng.randint(0, world_size))
-            y = int(rng.randint(0, world_size))
-            world.add_mountain(x, y, height=float(rng.uniform(3.0, 15.0)),
-                               radius=int(rng.randint(5, 12)))
-
-        sx, sy = int(rng.randint(0, world_size)), int(rng.randint(0, world_size))
-        gx, gy = int(rng.randint(0, world_size)), int(rng.randint(0, world_size))
-        if (sx, sy) == (gx, gy):
-            continue
-
-        came_from, path_coords = astar((sx, sy), (gx, gy), world)
-        if not path_coords:
-            continue
-
-        path_grid = np.zeros((world_size, world_size), dtype=np.float32)
-        for (px, py) in path_coords:
-            if 0 <= px < world_size and 0 <= py < world_size:
-                path_grid[py, px] = 1.0
-
-        elevations.append(world.grid.astype(np.float32))
-        starts.append((sx, sy))
-        goals.append((gx, gy))
-        paths.append(path_grid)
-
-    return PathfindingDataset(elevations, starts, goals, paths)
 
 
 # ---------------------------------------------------------------------------
@@ -195,10 +82,10 @@ class PathUNet(nn.Module):
         self.mid_attn = AttentionBlock(256)
 
         self.up1 = nn.ConvTranspose2d(256, 128, 2, 2)
-        self.rev1 = AdaGNBlock(256, 128, time_dim)
+        self.rev1 = AdaGNBlock(384, 128, time_dim)   # cat(u1[128], h2[256])
 
         self.up2 = nn.ConvTranspose2d(128, 64, 2, 2)
-        self.rev2 = AdaGNBlock(128, 64, time_dim)
+        self.rev2 = AdaGNBlock(192, 64, time_dim)    # cat(u2[64], h1[128])
 
         self.final_conv = nn.Conv2d(64, out_channels, 1)
 
@@ -319,3 +206,138 @@ def ddim_sample(model: nn.Module,
         x_t = torch.sqrt(alpha_prev) * x0_pred + dir_xt + sigma * noise
 
     return x_t  # B, 1, H, W — predicted path occupancy
+
+
+# ---------------------------------------------------------------------------
+# Inference: run a trained model on a GridWorld and extract a path
+# ---------------------------------------------------------------------------
+
+def infer_path(model, world, start, goal,
+               checkpoint: str = "data/diffusion_model.pt",
+               model_size: int = 32,
+               num_train_steps: int = 200,
+               num_sample_steps: int = 50,
+               device: str = "cpu") -> tuple[list, list]:
+    """
+    Run the trained diffusion model to predict a path between start and goal.
+
+    Steps:
+      1. Load model weights from checkpoint
+      2. Downsample the world grid to model_size × model_size
+      3. Build start/goal heatmaps in model coordinates
+      4. Run DDIM sampling to get a predicted path-occupancy grid
+      5. Treat the output as a cost map (high prob = low cost) and run
+         Dijkstra on it to extract a valid path
+      6. Map the path back to the original world coordinates
+
+    Returns:
+        (explored_path, shortest_path) — both set to the same predicted path
+        on success, or ([], []) on failure.
+    """
+    state = torch.load(checkpoint, map_location=device, weights_only=True)
+    model.load_state_dict(state)
+    model.to(device)
+    model.eval()
+
+    H, W = world.grid.shape  # grid is stored as grid[y, x]
+
+    # 1. Prepare elevation
+    elev_t = torch.from_numpy(world.grid.astype(np.float32)).unsqueeze(0).unsqueeze(0)
+    if H != model_size or W != model_size:
+        elev_t = F.interpolate(elev_t, size=(model_size, model_size),
+                               mode="bilinear", align_corners=False)
+    if elev_t.max() > 0:
+        elev_t = elev_t / elev_t.max()
+
+    # 2. Build start/goal heatmaps in model coordinates
+    sx = int(start[0] * model_size / W)
+    sy = int(start[1] * model_size / H)
+    gx = int(goal[0] * model_size / W)
+    gy = int(goal[1] * model_size / H)
+
+    ys, xs = torch.meshgrid(
+        torch.arange(model_size, dtype=torch.float32),
+        torch.arange(model_size, dtype=torch.float32),
+        indexing="ij",
+    )
+    sigma = 1.5
+    start_map = torch.exp(-((xs - sx) ** 2 + (ys - sy) ** 2) / (2 * sigma ** 2))
+    start_map = start_map.unsqueeze(0).unsqueeze(0)
+    goal_map = torch.exp(-((xs - gx) ** 2 + (ys - gy) ** 2) / (2 * sigma ** 2))
+    goal_map = goal_map.unsqueeze(0).unsqueeze(0)
+
+    # 3. Run DDIM
+    elev_t = elev_t.to(device)
+    start_map = start_map.to(device)
+    goal_map = goal_map.to(device)
+
+    pred = ddim_sample(model, elev_t, start_map, goal_map,
+                       num_train_steps=num_train_steps,
+                       num_sample_steps=num_sample_steps)
+    path_grid = pred[0, 0].cpu().numpy()  # [model_size, model_size]
+
+    # 4. Extract path via Dijkstra on an inverted cost map.
+    #    High model output → low cost → path is guided through cells the
+    #    model considers likely.
+    path_coords = _extract_path(path_grid, (sx, sy), (gx, gy))
+    if not path_coords:
+        return [], []
+
+    # 5. Map back to world coordinates
+    world_path = []
+    for px, py in path_coords:
+        wx = int(px * W / model_size)
+        wy = int(py * H / model_size)
+        wx = max(0, min(W - 1, wx))
+        wy = max(0, min(H - 1, wy))
+        world_path.append((wx, wy))
+
+    return world_path, world_path
+
+
+def _extract_path(cost_grid: np.ndarray,
+                  start: tuple[int, int],
+                  goal: tuple[int, int]) -> list[tuple[int, int]]:
+    """
+    Run Dijkstra on a cost map derived from the model output.
+
+    The model output is normalised to [0, 1] then inverted so that
+    high-confidence path cells have low cost.
+    """
+    import heapq
+
+    H, W = cost_grid.shape
+    gmin, gmax = float(cost_grid.min()), float(cost_grid.max())
+    if gmax > gmin:
+        cost_grid = (cost_grid - gmin) / (gmax - gmin)
+    cost_map = 1.0 - cost_grid  # high model output → low cost
+
+    heap = [(0.0, start)]
+    came_from = {start: None}
+    cost_so_far = {start: 0.0}
+
+    while heap:
+        cost, current = heapq.heappop(heap)
+        if current == goal:
+            break
+        cx, cy = current
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nx, ny = cx + dx, cy + dy
+            if 0 <= nx < W and 0 <= ny < H:
+                new_cost = cost_so_far[current] + cost_map[ny, nx]
+                if (nx, ny) not in cost_so_far or new_cost < cost_so_far[(nx, ny)]:
+                    cost_so_far[(nx, ny)] = new_cost
+                    heapq.heappush(heap, (new_cost, (nx, ny)))
+                    came_from[(nx, ny)] = current
+
+    if goal not in came_from:
+        return [start]
+
+    path = []
+    cur = goal
+    while cur != start:
+        path.append(cur)
+        cur = came_from[cur]
+    path.append(start)
+    path.reverse()
+    return path

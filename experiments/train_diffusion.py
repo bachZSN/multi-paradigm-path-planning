@@ -1,15 +1,28 @@
 """
 Train the grid-based diffusion model from algorithms/diffusion.py.
 
-Pipeline:
-  1. Generate (world, start, goal, path) pairs using A* on random GridWorlds
-  2. Save / load the dataset to disk
-  3. Train PathUNet via DDPM noise prediction
-  4. Sample paths with DDIM and compare to ground-truth A* paths
+Recommended workflow (from project root):
+  1. Generate dataset separately:
+       python -m experiments.make_dataset --num-worlds 200 --samples-per-world 5
 
-Usage (from project root):
-  python -m experiments.train_diffusion                    # fresh generate + train
-  python -m experiments.train_diffusion --epochs 100       # override training epochs
+  2. Train the model (uses cached dataset if already generated):
+       python -m experiments.train_diffusion
+
+  3. Launch the app and click "Diffusion" to see the model in action:
+       python main.py
+
+Expected training signal:
+  - Epoch   1-10:  loss ~1.0 → ~0.6  (model learns basic map structure)
+  - Epoch  10-30:  loss ~0.6 → ~0.3  (model learns to follow terrain)
+  - Epoch  30-50+:  loss ~0.3 → ~0.15 (model refines path predictions)
+  - Below 0.1:  overfitting on training worlds (consider more data)
+
+Hyperparameter guidelines:
+  --num-worlds 200     × 5 samples  =  1000 training samples  (minimum)
+  --num-worlds 500     × 5 samples  =  2500 training samples  (recommended)
+  --num-worlds 1000    × 5 samples  =  5000 training samples  (better generalization)
+  --epochs 50-100       watch loss curve, stop when it plateaus
+  --batch-size 32       good default; reduce to 16 if GPU memory is tight
 """
 
 import os
@@ -17,19 +30,15 @@ import argparse
 import numpy as np
 import torch
 
-from algorithms.diffusion import (
-    PathfindingDataset,
-    generate_dataset,
-    PathUNet,
-    DDPM,
-    ddim_sample,
-)
+from experiments.make_dataset import PathfindingDataset, generate_samples
+from algorithms.diffusion import PathUNet, DDPM, ddim_sample
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--world-size", type=int, default=32)
-    parser.add_argument("--num-worlds", type=int, default=500)
+    parser.add_argument("--num-worlds", type=int, default=200,
+                        help="number of random worlds (×5 samples each)")
     parser.add_argument("--obstacles-per-world", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=50)
@@ -49,10 +58,11 @@ def main():
         dataset = torch.load(args.data_path, weights_only=False)
     else:
         print(f"Generating {args.num_worlds} worlds with A* ...")
-        dataset = generate_dataset(
-            world_size=args.world_size,
+        dataset = generate_samples(
             num_worlds=args.num_worlds,
-            num_obstacles=args.obstacles_per_world,
+            samples_per_world=5,
+            world_size=args.world_size,
+            obstacles_per_world=args.obstacles_per_world,
         )
         os.makedirs("data", exist_ok=True)
         torch.save(dataset, args.data_path)

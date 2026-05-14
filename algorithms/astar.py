@@ -66,7 +66,7 @@ def astar(start, goal, grid):
         goal (tuple): Goal position (x, y).
         grid (GridWorld): the grid world containing terrain and validity checks.
     Returns:
-        tuple: (came_from, path) where came_from is the parent map and path is the reconstructed path.
+        tuple: (came_from, path) where came_from is the explored map and path is the reconstructed path.
     """
     frontier = []
     heapq.heappush(frontier, (0, start))
