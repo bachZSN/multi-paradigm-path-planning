@@ -31,7 +31,7 @@ import numpy as np
 import torch
 
 from experiments.make_dataset import PathfindingDataset, generate_samples
-from algorithms.diffusion import PathUNet, DDPM, ddim_sample
+from algorithms.diffusion import PathUNet, DDPM, ddim_sample_cfg
 
 
 def main():
@@ -103,13 +103,14 @@ def main():
     elevation, start_map, goal_map, gt_path = [t.to(device) for t in sample_batch]
 
     with torch.no_grad():
-        pred_path = ddim_sample(
+        pred_path = ddim_sample_cfg(
             model,
             elevation[:4],
             start_map[:4],
             goal_map[:4],
             num_train_steps=args.num_timesteps,
             num_sample_steps=args.ddim_steps,
+            guidance_scale=1.0,  # standard DDIM for evaluation
         )
 
     for i in range(min(4, pred_path.shape[0])):

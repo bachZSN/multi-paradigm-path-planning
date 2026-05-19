@@ -95,20 +95,25 @@ class PathUNet(nn.Module):
         t_emb = self.time_mlp(t)
         x_in = torch.cat([x, elevation, start_map, goal_map], dim=1)
 
-        h0 = self.init_conv(x_in)
-        h1 = self.down1(h0, t_emb)
-        h2 = self.down2(F.max_pool2d(h1, 2), t_emb)
+        # ---- encoder ----
+        h0 = self.init_conv(x_in)                           # 32x32, 64ch
+        h1 = self.down1(h0, t_emb)                          # 32x32, 128ch
+        h1_pooled = F.max_pool2d(h1, 2)                     # 16x16, 128ch
+        h2 = self.down2(h1_pooled, t_emb)                   # 16x16, 256ch
+        h2_pooled = F.max_pool2d(h2, 2)                     #  8x8, 256ch
 
-        h_mid = self.mid_block(F.max_pool2d(h2, 2), t_emb)
-        h_mid = self.mid_attn(h_mid)
+        # ---- bottleneck ----
+        h_mid = self.mid_block(h2_pooled, t_emb)            #  8x8, 256ch
+        h_mid = self.mid_attn(h_mid)                        #  8x8, 256ch
 
-        u1 = self.up1(h_mid)
-        u1 = self.rev1(torch.cat([u1, h2], dim=1), t_emb)
+        # ---- decoder ----
+        u1 = self.up1(h_mid)                                # 16x16, 128ch
+        u1 = self.rev1(torch.cat([u1, h2], dim=1), t_emb)   # concat 128+256=384
 
-        u2 = self.up2(u1)
-        u2 = self.rev2(torch.cat([u2, h1], dim=1), t_emb)
+        u2 = self.up2(u1)                                   # 32x32,  64ch
+        u2 = self.rev2(torch.cat([u2, h1], dim=1), t_emb)   # concat  64+128=192
 
-        return self.final_conv(u2)
+        return self.final_conv(u2)                          # 32x32,   1ch
 
 
 # ---------------------------------------------------------------------------
@@ -156,34 +161,44 @@ class DDPM:
 
 
 # ---------------------------------------------------------------------------
-# DDIM fast sampling
+# DDIM sampling with Classifier-Free Guidance (CFG)
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def ddim_sample(model: nn.Module,
-                elevation: torch.Tensor,
-                start_map: torch.Tensor,
-                goal_map: torch.Tensor,
-                num_train_steps: int = 200,
-                num_sample_steps: int = 50,
-                eta: float = 0.0) -> torch.Tensor:
+def ddim_sample_cfg(model: nn.Module,
+                    elevation: torch.Tensor,
+                    start_map: torch.Tensor,
+                    goal_map: torch.Tensor,
+                    num_train_steps: int = 200,
+                    num_sample_steps: int = 50,
+                    eta: float = 0.0,
+                    guidance_scale: float = 4.0) -> torch.Tensor:
     """
-    DDIM sampling: generate a path from noise.
-    Goes from t = num_sample_steps-1 down to 0.
+    DDIM sampling with Classifier-Free Guidance.
+
+    At each denoising step the model is evaluated twice:
+      - conditioned  on (elevation, start_map, goal_map)
+      - unconditioned on zero tensors of the same shape
+
+    The final noise estimate is extrapolated:
+        eps = eps_uncond + guidance_scale * (eps_cond - eps_uncond)
+
+    guidance_scale=1.0 reproduces standard conditioned DDIM.
     """
     device = next(model.parameters()).device
     B = elevation.shape[0]
     H, W = elevation.shape[-2:]
 
-    # use the same noise schedule as training
+    # noise schedule matching training
     betas = torch.linspace(1e-4, 0.02, num_train_steps, device=device)
     alphas = 1.0 - betas
     alpha_bar = torch.cumprod(alphas, dim=0)
 
-    # subsample steps for faster inference
     step_indices = torch.linspace(0, num_train_steps - 1, num_sample_steps, dtype=torch.long, device=device)
 
-    # start from pure noise
+    # null conditioning for CFG unconditional pass
+    null_cond = torch.zeros_like(elevation)
+
     x_t = torch.randn((B, 1, H, W), device=device)
 
     for i in range(num_sample_steps - 1, -1, -1):
@@ -193,9 +208,12 @@ def ddim_sample(model: nn.Module,
         alpha_cur = alpha_bar[t_idx]
         alpha_prev = alpha_bar[step_indices[i - 1]] if i > 0 else torch.tensor(1.0, device=device)
 
-        pred_noise = model(x_t, t, elevation, start_map, goal_map)
+        # CFG: two forward passes
+        eps_cond = model(x_t, t, elevation, start_map, goal_map)
+        eps_uncond = model(x_t, t, null_cond, null_cond, null_cond)
+        pred_noise = eps_uncond + guidance_scale * (eps_cond - eps_uncond)
 
-        # DDIM update: x_{t-1} = sqrt(alpha_prev) * x0_pred + sqrt(1 - alpha_prev - sigma^2) * pred_noise + sigma * noise
+        # DDIM update
         x0_pred = (x_t - torch.sqrt(1.0 - alpha_cur) * pred_noise) / torch.sqrt(alpha_cur)
         x0_pred = torch.clamp(x0_pred, -1.0, 1.0)
 
@@ -217,6 +235,7 @@ def infer_path(model, world, start, goal,
                model_size: int = 32,
                num_train_steps: int = 200,
                num_sample_steps: int = 50,
+               guidance_scale: float = 4.0,
                device: str = "cpu") -> tuple[list, list]:
     """
     Run the trained diffusion model to predict a path between start and goal.
@@ -225,10 +244,9 @@ def infer_path(model, world, start, goal,
       1. Load model weights from checkpoint
       2. Downsample the world grid to model_size × model_size
       3. Build start/goal heatmaps in model coordinates
-      4. Run DDIM sampling to get a predicted path-occupancy grid
-      5. Treat the output as a cost map (high prob = low cost) and run
-         Dijkstra on it to extract a valid path
-      6. Map the path back to the original world coordinates
+      4. Run CFG-guided DDIM sampling to get a path-occupancy grid
+      5. Upsample the predicted grid to the original world resolution
+      6. Run Dijkstra on the full-res confidence map with terrain awareness
 
     Returns:
         (explored_path, shortest_path) — both set to the same predicted path
@@ -240,9 +258,10 @@ def infer_path(model, world, start, goal,
     model.eval()
 
     H, W = world.grid.shape  # grid is stored as grid[y, x]
+    raw_elevation = world.grid.astype(np.float32)
 
-    # 1. Prepare elevation
-    elev_t = torch.from_numpy(world.grid.astype(np.float32)).unsqueeze(0).unsqueeze(0)
+    # 1. Prepare elevation for model input (downsampled + normalised)
+    elev_t = torch.from_numpy(raw_elevation).unsqueeze(0).unsqueeze(0)
     if H != model_size or W != model_size:
         elev_t = F.interpolate(elev_t, size=(model_size, model_size),
                                mode="bilinear", align_corners=False)
@@ -266,51 +285,46 @@ def infer_path(model, world, start, goal,
     goal_map = torch.exp(-((xs - gx) ** 2 + (ys - gy) ** 2) / (2 * sigma ** 2))
     goal_map = goal_map.unsqueeze(0).unsqueeze(0)
 
-    # 3. Run DDIM
+    # 3. Run CFG-guided DDIM
     elev_t = elev_t.to(device)
     start_map = start_map.to(device)
     goal_map = goal_map.to(device)
 
-    pred = ddim_sample(model, elev_t, start_map, goal_map,
-                       num_train_steps=num_train_steps,
-                       num_sample_steps=num_sample_steps)
-    path_grid = pred[0, 0].cpu().numpy()  # [model_size, model_size]
+    pred = ddim_sample_cfg(model, elev_t, start_map, goal_map,
+                           num_train_steps=num_train_steps,
+                           num_sample_steps=num_sample_steps,
+                           guidance_scale=guidance_scale)
+    # pred is [1, 1, model_size, model_size]
 
-    # 4. Extract path via Dijkstra on an inverted cost map.
-    #    High model output → low cost → path is guided through cells the
-    #    model considers likely.
-    path_coords = _extract_path(path_grid, (sx, sy), (gx, gy))
-    if not path_coords:
-        return [], []
+    # 4. Upsample to full world resolution
+    pred_world = F.interpolate(pred, size=(H, W), mode="bilinear", align_corners=False)
+    path_confidence = pred_world[0, 0].cpu().numpy()  # [H, W]
 
-    # 5. Map back to world coordinates
-    world_path = []
-    for px, py in path_coords:
-        wx = int(px * W / model_size)
-        wy = int(py * H / model_size)
-        wx = max(0, min(W - 1, wx))
-        wy = max(0, min(H - 1, wy))
-        world_path.append((wx, wy))
-
-    return world_path, world_path
+    # 5. Extract path at full resolution using terrain-aware Dijkstra
+    path_coords = _extract_path(path_confidence, raw_elevation, start, goal)
+    return (path_coords, path_coords) if path_coords else ([], [])
 
 
-def _extract_path(cost_grid: np.ndarray,
+def _extract_path(confidence_grid: np.ndarray,
+                  elevation_grid: np.ndarray,
                   start: tuple[int, int],
                   goal: tuple[int, int]) -> list[tuple[int, int]]:
     """
-    Run Dijkstra on a cost map derived from the model output.
+    Terrain-aware Dijkstra guided by the model's confidence map.
 
-    The model output is normalised to [0, 1] then inverted so that
-    high-confidence path cells have low cost.
+    Cost per step is a weighted sum of three terms:
+      1.  step_cost = 1.0                    (base movement)
+      2.  climb_penalty = max(0, Δh) × 20    (uphill penalty)
+      3.  model_penalty = 50 × (1 − prob)    (deviation from model corridor)
+
+    The model output is passed through a sigmoid to produce a smooth
+    probability field — the search is encouraged to stay within the
+    model's high-confidence corridor while respecting terrain cost.
     """
     import heapq
 
-    H, W = cost_grid.shape
-    gmin, gmax = float(cost_grid.min()), float(cost_grid.max())
-    if gmax > gmin:
-        cost_grid = (cost_grid - gmin) / (gmax - gmin)
-    cost_map = 1.0 - cost_grid  # high model output → low cost
+    H, W = confidence_grid.shape
+    prob_map = 1.0 / (1.0 + np.exp(-confidence_grid))
 
     heap = [(0.0, start)]
     came_from = {start: None}
@@ -321,17 +335,26 @@ def _extract_path(cost_grid: np.ndarray,
         if current == goal:
             break
         cx, cy = current
+        current_elev = elevation_grid[cy, cx]
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             nx, ny = cx + dx, cy + dy
-            if 0 <= nx < W and 0 <= ny < H:
-                new_cost = cost_so_far[current] + cost_map[ny, nx]
-                if (nx, ny) not in cost_so_far or new_cost < cost_so_far[(nx, ny)]:
-                    cost_so_far[(nx, ny)] = new_cost
-                    heapq.heappush(heap, (new_cost, (nx, ny)))
-                    came_from[(nx, ny)] = current
+            if not (0 <= nx < W and 0 <= ny < H):
+                continue
+
+            target_elev = elevation_grid[ny, nx]
+            step_cost = 1.0
+            climb_penalty = max(0.0, target_elev - current_elev) * 20.0
+            model_penalty = 50.0 * (1.0 - prob_map[ny, nx])
+            total_move_cost = step_cost + climb_penalty + model_penalty
+
+            new_cost = cost_so_far[current] + total_move_cost
+            if (nx, ny) not in cost_so_far or new_cost < cost_so_far[(nx, ny)]:
+                cost_so_far[(nx, ny)] = new_cost
+                heapq.heappush(heap, (new_cost, (nx, ny)))
+                came_from[(nx, ny)] = current
 
     if goal not in came_from:
-        return [start]
+        return []
 
     path = []
     cur = goal
