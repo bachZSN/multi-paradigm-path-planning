@@ -66,9 +66,11 @@ class TrajectoryDataset(Dataset):
         return len(self.trajectories)
 
     def __getitem__(self, idx: int):
-        traj = torch.from_numpy(self.trajectories[idx])         # [T, 2]
-        elev = torch.from_numpy(self.elevations[idx]).unsqueeze(0)  # [1, H, W]
-        return traj, elev
+        traj = torch.from_numpy(self.trajectories[idx])                # [T, 2]
+        elev = torch.from_numpy(self.elevations[idx]).unsqueeze(0)     # [1, H, W]
+        start = torch.from_numpy(self.starts[idx]).to(torch.float32)   # [2]
+        goal  = torch.from_numpy(self.goals[idx]).to(torch.float32)    # [2]
+        return traj, elev, start, goal
 
 
 def generate_trajectory_dataset(

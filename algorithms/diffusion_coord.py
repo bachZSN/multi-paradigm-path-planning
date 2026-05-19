@@ -198,7 +198,7 @@ class TrajectoryDDPM:
         return sab * x0 + som * noise, noise
 
     def train_step(self, batch, optimizer: torch.optim.Optimizer) -> float:
-        trajectory, elevation_map = batch
+        trajectory, elevation_map, _start_coords, _goal_coords = batch
         trajectory = trajectory.to(self.device)
         elevation_map = elevation_map.to(self.device)
         B = trajectory.shape[0]
@@ -279,65 +279,93 @@ class TrajectoryDDPM:
 # Inference: run a trained TrajectoryUNet1D on a GridWorld
 # ---------------------------------------------------------------------------
 
-def infer_path_coord(model, world, start, goal,
+@torch.no_grad()
+def infer_path_coord(model, world, start: tuple[int, int], goal: tuple[int, int],
                      checkpoint: str = "data/diffusion_coord_model.pt",
                      T: int = 64,
                      num_train_steps: int = 200,
                      num_sample_steps: int = 50,
                      device: str = "cpu") -> tuple[list, list]:
     """
-    Run the trained 1D trajectory diffusion model to predict a path.
-
-    Steps:
-      1. Load model weights
-      2. Normalise start/goal to [-1, 1] coordinate space
-      3. Normalise elevation map to [0, 1]
-      4. Run TrajectoryDDPM.sample (in-painting locks ends)
-      5. Convert sampled coordinates back to world pixel coords
-
-    Returns:
-        (explored_path, shortest_path) — both set to the same predicted path,
-        or ([], []) on failure.
+    Inference loop for 1D Coordinate Diffusion.
+    Generates a continuous sequence of T coordinates, then scales them back to pixels.
     """
+    # 1. Load and prepare the model
     state = torch.load(checkpoint, map_location=device, weights_only=True)
     model.load_state_dict(state)
     model.to(device)
     model.eval()
 
-    H, W = world.grid.shape
+    H, W = world.grid.shape  # Original map pixel dimensions
 
-    # 1. Normalise elevation map → [0, 1]
-    elev_t = torch.from_numpy(world.grid.astype(np.float32)).unsqueeze(0).unsqueeze(0)
-    if elev_t.max() > 0:
-        elev_t = elev_t / elev_t.max()
+    # 2. Normalize the raw elevation map to [0, 1] context
+    elev_np = world.grid.astype(np.float32)
+    if elev_np.max() > 0:
+        elev_np = elev_np / elev_np.max()
+    elev_t = torch.from_numpy(elev_np).unsqueeze(0).unsqueeze(0).to(device)  # [1, 1, H, W]
 
-    # 2. Convert start/goal to model coordinate space [-1, 1]
-    def _to_model(px, py):
-        return (-1.0 + 2.0 * px / (W - 1),
-                -1.0 + 2.0 * py / (H - 1))
+    # 3. Normalize Start/Goal pixels to continuous [-1.0, 1.0] coordinates
+    def norm_coords(px, py):
+        nx = -1.0 + 2.0 * px / (W - 1)
+        ny = -1.0 + 2.0 * py / (H - 1)
+        return torch.tensor([nx, ny], dtype=torch.float32, device=device)
 
-    def _to_world(mx, my):
-        return (int(round((mx + 1.0) * 0.5 * (W - 1))),
-                int(round((my + 1.0) * 0.5 * (H - 1))))
+    start_norm = norm_coords(start[0], start[1])  # [2]
+    goal_norm = norm_coords(goal[0], goal[1])    # [2]
 
-    sx_m, sy_m = _to_model(*start)
-    gx_m, gy_m = _to_model(*goal)
-    start_t = torch.tensor([[sx_m, sy_m]], device=device)
-    goal_t  = torch.tensor([[gx_m, gy_m]], device=device)
+    # 4. Set up the DDIM alpha noise schedule
+    betas = torch.linspace(1e-4, 0.02, num_train_steps, device=device)
+    alphas = 1.0 - betas
+    alpha_bar = torch.cumprod(alphas, dim=0)
+    step_indices = torch.linspace(0, num_train_steps - 1, num_sample_steps, dtype=torch.long, device=device)
 
-    elev_t = elev_t.to(device)
+    # 5. Initialize the path as pure Gaussian noise: [1, T, 2]
+    x_t = torch.randn((1, T, 2), device=device)
 
-    # 3. Run in-painting sampling
-    ddpm = TrajectoryDDPM(model, num_timesteps=num_train_steps, device=device)
-    pred = ddpm.sample(elev_t, start_t, goal_t, num_steps=num_sample_steps)
-    # pred is [1, T, 2]
+    # --- FIRST IN-PAINTING LOCK ---
+    # Force the very first and last steps of our random noise to match our targets
+    x_t[0, 0] = start_norm
+    x_t[0, -1] = goal_norm
 
-    # 4. Convert to world coordinates
-    path = [_to_world(p[0].item(), p[1].item()) for p in pred[0]]
-    # remove duplicate consecutive waypoints
-    deduped = [path[0]]
-    for p in path[1:]:
-        if p != deduped[-1]:
-            deduped.append(p)
+    # 6. Reverse Denoising Loop
+    for i in range(num_sample_steps - 1, -1, -1):
+        t_idx = step_indices[i]
+        t = t_idx.unsqueeze(0)
 
-    return (deduped, deduped) if deduped else ([], [])
+        alpha_cur = alpha_bar[t_idx]
+        alpha_prev = alpha_bar[step_indices[i - 1]] if i > 0 else torch.tensor(1.0, device=device)
+
+        # Predict the noise vector using our U-Net
+        pred_noise = model(x_t, t, elev_t)
+
+        # DDIM update step math
+        x0_pred = (x_t - torch.sqrt(1.0 - alpha_cur) * pred_noise) / torch.sqrt(alpha_cur)
+        x0_pred = torch.clamp(x0_pred, -1.0, 1.0)  # Keep coordinates inside the map bounds
+
+        dir_xt = torch.sqrt(1.0 - alpha_prev) * pred_noise
+        x_t = torch.sqrt(alpha_prev) * x0_pred + dir_xt
+
+        # --- DYNAMIC IN-PAINTING CONSTRAINT ---
+        # Overwrite the endpoints at every single step so they cannot drift!
+        x_t[0, 0] = start_norm
+        x_t[0, -1] = goal_norm
+
+    # 7. SCALE-BACK PHASE: Convert continuous [-1.0, 1.0] vectors back to grid pixels
+    final_coords = x_t[0].cpu().numpy()  # Shape: [T, 2]
+    pixel_path = []
+
+    for nx, ny in final_coords:
+        # Inverse normalization math formulas
+        px = int(np.round(((nx + 1.0) / 2.0) * (W - 1)))
+        py = int(np.round(((ny + 1.0) / 2.0) * (H - 1)))
+
+        # Hard safety boundaries to prevent array index out-of-bounds errors
+        px = max(0, min(W - 1, px))
+        py = max(0, min(H - 1, py))
+
+        # Avoid saving duplicated sequential coordinates if the model stays on a pixel
+        if not pixel_path or pixel_path[-1] != (px, py):
+            pixel_path.append((px, py))
+
+    # Return the clean pixel path list: [(x0, y0), (x1, y1), ...]
+    return pixel_path, pixel_path
