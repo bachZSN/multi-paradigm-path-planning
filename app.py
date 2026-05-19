@@ -6,6 +6,7 @@ from visualization.UIManager import UIManager
 from visualization.renderer import Renderer
 from algorithms.astar import astar, dijkstra_search, bfs, calculate_total_cost
 from algorithms.diffusion import PathUNet, infer_path
+from algorithms.diffusion_coord import TrajectoryUNet1D, infer_path_coord
 
 class App:
     def __init__(self):
@@ -51,9 +52,19 @@ class App:
                 self.explored_path = explored if explored else None
                 self.shortest_path = shortest if shortest else None
                 print(f"  Diffusion path found: {len(self.shortest_path) if self.shortest_path else 0} waypoints")
-            case "Hill Climb":
-                self.explored_path, self.shortest_path = bfs(self.agent.start, self.agent.goal, self.world)
-                print ("Hill Climb button clicked")
+            case "Coord-Diff":
+                print ("Running coordinate trajectory diffusion model ...")
+                ckpt = "data/diffusion_coord_model.pt"
+                if not os.path.exists(ckpt):
+                    print(f"  No checkpoint found at {ckpt}. Train the coordinate model first.")
+                    return
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model = TrajectoryUNet1D(time_dim=128, T=64)
+                explored, shortest = infer_path_coord(model, self.world, self.agent.start,
+                                                       self.agent.goal, checkpoint=ckpt, device=device)
+                self.explored_path = explored if explored else None
+                self.shortest_path = shortest if shortest else None
+                print(f"  Coord-Diff path found: {len(self.shortest_path) if self.shortest_path else 0} waypoints")
             case "Toggle Path":
                 self.show_path = not self.show_path
             case "Reset":

@@ -25,7 +25,7 @@ class UIManager:
         # Add algorithm buttons
         self.add_button(screen_width - button_width - self.margin, start_y, button_width, button_height, (0, 128, 0), "A*", lambda: self.ui_action("A*"))
         self.add_button(screen_width - button_width - self.margin, start_y + (button_height + spacing), button_width, button_height, (0, 128, 0), "Diffusion", lambda: self.ui_action("Diffusion"))
-        self.add_button(screen_width - button_width - self.margin, start_y + 2 * (button_height + spacing), button_width, button_height, (0, 128, 0), "Hill Climb", lambda: self.ui_action("Hill Climb"))
+        self.add_button(screen_width - button_width - self.margin, start_y + 2 * (button_height + spacing), button_width, button_height, (0, 128, 0), "Coord-Diff", lambda: self.ui_action("Coord-Diff"))
 
         # Add Reset and Quit buttons
         self.add_button(screen_width - 2* button_width - 2 * self.margin , start_y + 3 * (button_height + spacing), button_width, button_height, (128, 0, 0), "Toggle Path", self.toggle_show_path, hover_color=(150, 0, 0))
@@ -100,7 +100,7 @@ class UIManager:
                     case pygame.K_2:
                         self.ui_action("Diffusion")
                     case pygame.K_3:
-                        self.ui_action("Hill Climb")
+                        self.ui_action("Coord-Diff")
                     case pygame.K_SPACE:
                         self.toggle_play_pause()
                     case pygame.K_RIGHT:

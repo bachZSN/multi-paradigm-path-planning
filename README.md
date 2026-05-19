@@ -1,2 +1,170 @@
-# multi-paradigm-path-planning
-A multi-paradigm study of search and planning methods, comparing A*, constraint satisfaction (CSP), and gradient-based optimization on shared pathfinding and multi-agent environments. The project explores how discrete, symbolic, and continuous representations of the same problem affect efficiency, robustness, and solution quality.
+# Multi-Paradigm Path Planning
+
+A comparative study of search, diffusion, and constraint-based path planning on shared grid-world environments with elevation terrain.
+
+## Project Structure
+
+```
+.
+├── main.py                          # Entry point — launch the app
+├── app.py                           # App class wiring UI actions to algorithms
+├── requirements.txt                 # Dependencies (torch, pygame, numpy, ...)
+│
+├── environments/
+│   ├── grid_world.py                # GridWorld terrain model (float64, grid[y,x])
+│   └── __init__.py
+│
+├── algorithms/
+│   ├── astar.py                     # A*, Dijkstra, BFS, cost calculation
+│   ├── diffusion.py                 # Grid-based PathUNet + DDPM + DDIM/CFG infer
+│   ├── diffusion_coord.py           # 1D trajectory TrajectoryUNet1D + DDPM + in-painting
+│   └── __init__.py                  # Exports all algorithm modules
+│
+├── experiments/
+│   ├── make_dataset.py              # Dataset generator (grid-based: elevation + path maps)
+│   ├── train_diffusion.py           # Training script for grid-based diffusion model
+│   ├── train_diffusion_coord.py     # Training script for 1D trajectory diffusion model
+│   └── __init__.py
+│
+├── visualization/
+│   ├── renderer.py                  # Pygame world renderer
+│   ├── UIManager.py                 # Button layout, keyboard shortcuts, event handling
+│   └── __init__.py
+│
+└── data/                            # Checkpoints & datasets (gitignored)
+    └── .gitkeep
+```
+
+## Setup
+
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+Requires Python 3.10+ and PyTorch.
+
+## Running the App
+
+```bash
+python main.py
+```
+
+### Controls
+
+| Key  | Action       | Description                                |
+|------|-------------|--------------------------------------------|
+| `1`  | A*          | Classic A* search                          |
+| `2`  | Diffusion   | Grid-based diffusion model                 |
+| `3`  | Coord-Diff  | 1D trajectory coordinate diffusion model   |
+| `r`  | Reset       | Generate new random world                  |
+| `t`  | Toggle Path | Show/hide the path overlay                 |
+| `q`  | Quit        | Exit the app                               |
+
+Click any button with the mouse to activate it.
+
+## Training the Models
+
+### Grid-Based Diffusion (`PathUNet`)
+
+Generates 2D occupancy heatmaps, extracts path via terrain-aware Dijkstra.
+
+```bash
+# Generate dataset + train in one step (caches to data/training_dataset.pt)
+python -m experiments.train_diffusion --num-worlds 200 --epochs 50
+
+# Train from an already-cached dataset
+python -m experiments.train_diffusion --epochs 100
+
+# Custom parameters
+python -m experiments.train_diffusion \
+    --num-worlds 500 \
+    --samples-per-world 5 \
+    --batch-size 32 \
+    --epochs 80 \
+    --lr 1e-3 \
+    --num-timesteps 200 \
+    --checkpoint data/diffusion_model.pt
+```
+
+The model outputs 2D confidence maps at reduced resolution (32×32). The inference pipeline (`infer_path`) upsamples to full world resolution and uses Dijkstra with a neuro-symbolic cost function: `step_cost + climb_penalty × 20 + model_penalty × 50`.
+
+**Loss guide:**
+- Epoch 1–10:  ~1.0 → ~0.6  (learns map structure)
+- Epoch 10–30: ~0.6 → ~0.3  (learns terrain-aware routing)
+- Epoch 30–50+: ~0.3 → ~0.15 (refinement)
+- Below 0.1: likely overfitting (add more worlds or augment)
+
+### 1D Trajectory Diffusion (`TrajectoryUNet1D`)
+
+Generates path waypoints directly as continuous `[T, 2]` sequences using start/goal in-painting sampling.
+
+```bash
+# Generate + train (caches to data/trajectory_dataset.pt)
+python -m experiments.train_diffusion_coord --num-worlds 200 --epochs 80
+
+# Custom parameters
+python -m experiments.train_diffusion_coord \
+    --num-worlds 300 \
+    --samples-per-world 5 \
+    --T 64 \
+    --batch-size 32 \
+    --epochs 100 \
+    --lr 1e-3 \
+    --num-timesteps 200 \
+    --checkpoint data/diffusion_coord_model.pt
+```
+
+The model uses 1D temporal convolutions over the trajectory timeline. It queries the 2D elevation map via `F.grid_sample` in the bottleneck. Sampling clamps start (index 0) and goal (index T−1) at every denoising step.
+
+## Reusing Generated Datasets
+
+**Yes.** Both training scripts auto-detect cached datasets:
+
+- `data/training_dataset.pt` — grid-based (elevation/start/goal/path maps at 32×32). Created by `train_diffusion.py` or `make_dataset.py`.
+- `data/trajectory_dataset.pt` — coordinate-based (waypoint trajectories at fixed length `T`). Created by `train_diffusion_coord.py`.
+
+If the file exists, the script loads it instead of regenerating. Delete or move the file to force regeneration.
+
+### Dataset Contents
+
+**Grid-based** (`PathfindingDataset`, generated by `make_dataset.py`):
+Each sample returns 4 tensors:
+- `elevation`  `[1, H, W]` — normalised terrain
+- `start_map`  `[1, H, W]` — gaussian heatmap at start
+- `goal_map`   `[1, H, W]` — gaussian heatmap at goal
+- `path_map`   `[1, H, W]` — binary A* path occupancy
+
+**Trajectory-based** (`TrajectoryDataset`, generated by `train_diffusion_coord.py`):
+Each sample returns:
+- `trajectory`  `[T, 2]` — interpolated waypoints normalised to `[-1, 1]`
+- `elevation`   `[1, H, W]` — normalised terrain
+
+## How the Diffusion Models Work
+
+### Grid-Based Pipeline
+
+1. Condition the model on 4 input channels (noisy path + elevation + start + goal maps)
+2. DDIM sampling with CFG at `guidance_scale=4.0` produces a 2D confidence map
+3. Upsample to full world resolution via `F.interpolate`
+4. Dijkstra extracts the lowest-cost path using: `step_cost + climb × 20 + (1 − confidence) × 50`
+
+### Coordinate-Based Pipeline
+
+1. Start/goal are normalised to `[-1, 1]` range
+2. Model is initial trajectory as pure noise
+3. DDPM in-painting sampling: model predicts noise, denoises trajectory, clamps start/goal
+4. Output `[T, 2]` waypoints are de-normalised to integer world coordinates
+5. Consecutive duplicate waypoints are removed
+
+## Configuration
+
+All constants used by the app (checkpoint paths, model sizes) are in `app.py`. The two model checkpoints are:
+
+- `data/diffusion_model.pt` — grid PathUNet (117 MB with fp32 weights)
+- `data/diffusion_coord_model.pt` — 1D TrajectoryUNet1D (smaller, ~5–15 MB)
+
+## Citation & Paper
+
+See `paper/` directory for related write-up.
