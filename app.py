@@ -24,7 +24,7 @@ class App:
         self.explored_path = None
         self.shortest_path = None
         self.show_path = True
-        self.agent = Agent(start=(5, 5), goal=(84, 69))
+        self.agent = Agent(start=(92, 5), goal=(7, 75))
         self.agents = [self.agent]
 
     def reset_world(self):
