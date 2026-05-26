@@ -66,6 +66,10 @@ python main.py
 | `1` | A\*         | Classic A\* search                       |
 | `2` | Diffusion   | Grid-based diffusion model               |
 | `3` | Coord-Diff  | 1D trajectory coordinate diffusion model |
+| `4` | Diffusion+  | Grid diffusion + model-A* refinement     |
+| `5` | Coord-Diff+ | Coord diffusion + model-A* refinement    |
+| `6` | Diffusion~  | Grid diffusion + greedy refinement       |
+| `7` | Coord-Diff~ | Coord diffusion + greedy refinement      |
 | `r` | Reset       | Generate new random world                |
 | `t` | Toggle Path | Show/hide the path overlay               |
 | `q` | Quit        | Exit the app                             |

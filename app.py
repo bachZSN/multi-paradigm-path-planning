@@ -37,8 +37,14 @@ class App:
         match action_name:
             case "A*":
                 self.explored_path, self.shortest_path = astar(self.agent.start, self.agent.goal, self.world)
-            case "Diffusion":
-                print ("Running trained diffusion model ...")
+            case "Diffusion" | "Diffusion+" | "Diffusion~":
+                refine = {
+                    "Diffusion": "dijkstra",
+                    "Diffusion+": "astar_model",
+                    "Diffusion~": "greedy_model",
+                }[action_name]
+
+                print(f"Running trained diffusion model ({refine}) ...")
                 import torch
                 from algorithms.diffusion import PathUNet, infer_path
                 ckpt = "data/diffusion_model.pt"
@@ -64,6 +70,7 @@ class App:
                     checkpoint=ckpt,
                     device=device,
                     metrics=metrics,
+                    refine=refine,
                 )
                 self.explored_path = explored if explored else None
                 self.shortest_path = shortest if shortest else None
@@ -73,6 +80,8 @@ class App:
 
                 print("  Metrics:")
                 print(f"    A* time:        {(t1 - t0) * 1000.0:.2f} ms")
+                if _explored_astar is not None:
+                    print(f"    A* discovered:  {len(_explored_astar)}")
                 if cost_astar is not None:
                     print(f"    A* cost:        {cost_astar:.2f}")
                 if "grid.sample_seconds" in metrics:
@@ -81,12 +90,24 @@ class App:
                     print(f"    Refine search:  {metrics['grid.refine_seconds'] * 1000.0:.2f} ms")
                 if "grid.total_seconds" in metrics:
                     print(f"    Total:          {metrics['grid.total_seconds'] * 1000.0:.2f} ms")
+                if "grid.refine_expanded" in metrics:
+                    print(f"    Refine expanded:{metrics['grid.refine_expanded']}")
+                if "grid.refine_pushed" in metrics:
+                    print(f"    Refine pushed:  {metrics['grid.refine_pushed']}")
+                if "grid.refine_discovered" in metrics:
+                    print(f"    Refine discover:{metrics['grid.refine_discovered']}")
                 if cost_grid is not None:
                     print(f"    Diffusion cost: {cost_grid:.2f}")
                 if (cost_astar is not None) and (cost_grid is not None):
                     print(f"    Cost delta:     {cost_grid - cost_astar:+.2f} (Diffusion - A*)")
-            case "Coord-Diff":
-                print ("Running coordinate trajectory diffusion model ...")
+            case "Coord-Diff" | "Coord-Diff+" | "Coord-Diff~":
+                refine = {
+                    "Coord-Diff": "dijkstra",
+                    "Coord-Diff+": "astar_model",
+                    "Coord-Diff~": "greedy_model",
+                }[action_name]
+
+                print(f"Running coordinate trajectory diffusion model ({refine}) ...")
                 import torch
                 from algorithms.diffusion_coord import TrajectoryUNet1D, infer_path_coord
                 ckpt = "data/diffusion_coord_model.pt"
@@ -112,6 +133,7 @@ class App:
                     checkpoint=ckpt,
                     device=device,
                     metrics=metrics,
+                    refine=refine,
                 )
                 self.explored_path = explored if explored else None
                 self.shortest_path = shortest if shortest else None
@@ -121,6 +143,8 @@ class App:
 
                 print("  Metrics:")
                 print(f"    A* time:        {(t1 - t0) * 1000.0:.2f} ms")
+                if _explored_astar is not None:
+                    print(f"    A* discovered:  {len(_explored_astar)}")
                 if cost_astar is not None:
                     print(f"    A* cost:        {cost_astar:.2f}")
                 if "coord.sample_seconds" in metrics:
@@ -129,6 +153,12 @@ class App:
                     print(f"    Refine search:  {metrics['coord.refine_seconds'] * 1000.0:.2f} ms")
                 if "coord.total_seconds" in metrics:
                     print(f"    Total:          {metrics['coord.total_seconds'] * 1000.0:.2f} ms")
+                if "coord.refine_expanded" in metrics:
+                    print(f"    Refine expanded:{metrics['coord.refine_expanded']}")
+                if "coord.refine_pushed" in metrics:
+                    print(f"    Refine pushed:  {metrics['coord.refine_pushed']}")
+                if "coord.refine_discovered" in metrics:
+                    print(f"    Refine discover:{metrics['coord.refine_discovered']}")
                 if cost_coord is not None:
                     print(f"    Coord cost:     {cost_coord:.2f}")
                 if (cost_astar is not None) and (cost_coord is not None):

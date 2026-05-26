@@ -14,29 +14,46 @@ class UIManager:
         screen_width = self.screen.get_width()
         screen_height = self.screen.get_height()
 
-        # Calculate dynamic button height and spacing
-        button_width = 200
+        # Button geometry
+        # Keep both columns to the RIGHT of the legend.
+        button_width = 160
         button_height = 80
-        spacing = self.margin
+        row_spacing = 10
+        col_spacing = 20
 
-        # Calculate starting y-coordinate for the first button
-        start_y = self.margin
+        right_x = screen_width - button_width - self.margin
+        left_x = right_x - col_spacing - button_width
 
-        # Add algorithm buttons
-        self.add_button(screen_width - button_width - self.margin, start_y, button_width, button_height, (0, 128, 0), "A*", lambda: self.ui_action("A*"))
-        self.add_button(screen_width - button_width - self.margin, start_y + (button_height + spacing), button_width, button_height, (0, 128, 0), "Diffusion", lambda: self.ui_action("Diffusion"))
-        self.add_button(screen_width - button_width - self.margin, start_y + 2 * (button_height + spacing), button_width, button_height, (0, 128, 0), "Coord-Diff", lambda: self.ui_action("Coord-Diff"))
+        # Right column: diffusion variants (top -> bottom), anchored to bottom-right
+        right_items = [
+            ("Diffusion", lambda: self.ui_action("Diffusion")),
+            ("Diffusion+", lambda: self.ui_action("Diffusion+")),
+            ("Diffusion~", lambda: self.ui_action("Diffusion~")),
+            ("Coord-Diff", lambda: self.ui_action("Coord-Diff")),
+            ("Coord-Diff+", lambda: self.ui_action("Coord-Diff+")),
+            ("Coord-Diff~", lambda: self.ui_action("Coord-Diff~")),
+        ]
+        right_total_h = len(right_items) * button_height + (len(right_items) - 1) * row_spacing
+        right_start_y = screen_height - self.margin - right_total_h
 
-        # Add Reset and Quit buttons
-        self.add_button(screen_width - 2* button_width - 2 * self.margin , start_y + 3 * (button_height + spacing), button_width, button_height, (128, 0, 0), "Toggle Path", self.toggle_show_path, hover_color=(150, 0, 0))
-        self.add_button(screen_width - button_width - self.margin, start_y + 3 * (button_height + spacing), button_width, button_height, (128, 0, 0), "Reset", lambda: self.ui_action("Reset"), hover_color=(150, 0, 0))
-        self.add_button(screen_width - button_width - self.margin, start_y + 4 * (button_height + spacing), button_width, button_height, (128, 0, 0), "Quit", lambda: self.ui_action("Quit"), hover_color=(150, 0, 0))
+        for i, (label, cb) in enumerate(right_items):
+            y = right_start_y + i * (button_height + row_spacing)
+            self.add_button(right_x, y, button_width, button_height, (0, 128, 0), label, cb)
 
-        # Add control buttons with icons (repositioned to avoid overlap)
-        icon_button_size = 50
-        self.add_icon_button(screen_width - button_width - self.margin - 3 * icon_button_size - 3 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), "<", lambda: self.ui_action("Backward"))
-        self.add_icon_button(screen_width - button_width - self.margin - 2 * icon_button_size - 2 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), ">", lambda: self.ui_action("Forward"))
-        self.add_icon_button(screen_width - button_width - self.margin - icon_button_size - 1 * spacing, start_y + 4 * (button_height + spacing), icon_button_size, icon_button_size, (128, 128, 128), "►", self.toggle_play_pause)
+        # Left column: app controls (top -> bottom), also anchored to bottom
+        left_items = [
+            ("A*", lambda: self.ui_action("A*"), (0, 128, 0)),
+            ("Toggle Path", self.toggle_show_path, (128, 0, 0)),
+            ("Reset", lambda: self.ui_action("Reset"), (128, 0, 0)),
+            ("Quit", lambda: self.ui_action("Quit"), (128, 0, 0)),
+        ]
+        left_total_h = len(left_items) * button_height + (len(left_items) - 1) * row_spacing
+        left_start_y = screen_height - self.margin - left_total_h
+
+        for i, (label, cb, color) in enumerate(left_items):
+            y = left_start_y + i * (button_height + row_spacing)
+            hover = (0, 150, 0) if color == (0, 128, 0) else (150, 0, 0)
+            self.add_button(left_x, y, button_width, button_height, color, label, cb, hover_color=hover)
 
     def add_button(self, x, y, width, height, color, text, callback, hover_color=None):
         """Add a text-based button to the UI."""
@@ -74,7 +91,7 @@ class UIManager:
             pygame.draw.rect(self.screen, color, button["rect"], border_radius=15)
 
             # Draw the button text or icon
-            font = pygame.font.Font(None, 36)
+            font = pygame.font.Font(None, 32)
             if "text" in button:
                 text_surface = font.render(button["text"], True, (255, 255, 255))
                 text_rect = text_surface.get_rect(center=button["rect"].center)
@@ -101,12 +118,20 @@ class UIManager:
                         self.ui_action("Diffusion")
                     case pygame.K_3:
                         self.ui_action("Coord-Diff")
+                    case pygame.K_4:
+                        self.ui_action("Diffusion+")
+                    case pygame.K_5:
+                        self.ui_action("Coord-Diff+")
+                    case pygame.K_6:
+                        self.ui_action("Diffusion~")
+                    case pygame.K_7:
+                        self.ui_action("Coord-Diff~")
                     case pygame.K_SPACE:
-                        self.toggle_play_pause()
+                        pass
                     case pygame.K_RIGHT:
-                        self.ui_action("Forward")
+                        pass
                     case pygame.K_LEFT:
-                        self.ui_action("Backward")
+                        pass
                     case pygame.K_t:
                         self.toggle_show_path()
                     case pygame.K_r:

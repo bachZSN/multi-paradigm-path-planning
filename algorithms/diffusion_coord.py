@@ -334,7 +334,8 @@ def infer_path_coord(model, world, start: tuple[int, int], goal: tuple[int, int]
                      num_train_steps: int = 200,
                      num_sample_steps: int = 50,
                      device: str = "cpu",
-                     metrics: dict | None = None) -> tuple[list, list]:
+                     metrics: dict | None = None,
+                     refine: str = "dijkstra") -> tuple[list, list]:
     """
     Inference loop for 1D Coordinate Diffusion.
     Generates a continuous sequence of T coordinates, then scales them back to pixels.
@@ -441,21 +442,26 @@ def infer_path_coord(model, world, start: tuple[int, int], goal: tuple[int, int]
     # 8. Symbolic post-pass: convert the (possibly jagged) trajectory to a
     # grid-valid path via a Dijkstra search guided by the trajectory corridor.
     t_refine_start = time.perf_counter()
-    refined = _extract_grid_path_from_trajectory(
+    refined, explored, refine_stats = _extract_grid_path_from_trajectory(
         trajectory_pixels=pixel_path,
         elevation_grid=world.grid,
         start=start,
         goal=goal,
+        refine=refine,
     )
     t_refine_end = time.perf_counter()
     if metrics is not None:
         metrics["coord.refine_seconds"] = t_refine_end - t_refine_start
         metrics["coord.total_seconds"] = (t_refine_end - t_sample_start)
+        metrics["coord.refine_expanded"] = int(refine_stats.get("expanded", 0))
+        metrics["coord.refine_pushed"] = int(refine_stats.get("pushed", 0))
+        metrics["coord.refine_discovered"] = int(refine_stats.get("discovered", 0))
 
     # If refinement fails (e.g. disconnected due to obstacles), fall back to
     # the raw predicted pixels so the UI still shows something.
     out = refined if refined else pixel_path
-    return out, out
+    explored_out = explored if refined else pixel_path
+    return explored_out, out
 
 
 def _extract_grid_path_from_trajectory(
@@ -466,7 +472,8 @@ def _extract_grid_path_from_trajectory(
     *,
     corridor_weight: float = 50.0,
     climb_weight: float = 20.0,
-) -> list[tuple[int, int]]:
+    refine: str = "dijkstra",
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]], dict]:
     """Terrain-aware Dijkstra guided by the predicted trajectory.
 
     This is the symbolic piece that turns a continuous/jagged waypoint sequence
@@ -479,6 +486,9 @@ def _extract_grid_path_from_trajectory(
     """
     H, W = elevation_grid.shape
 
+    if refine not in {"dijkstra", "astar_model", "greedy_model"}:
+        raise ValueError(f"Unknown refine mode: {refine}")
+
     def passable(x: int, y: int) -> bool:
         v = elevation_grid[y, x]
         return (v >= 0) and (not np.isinf(v))
@@ -486,9 +496,9 @@ def _extract_grid_path_from_trajectory(
     sx, sy = start
     gx, gy = goal
     if not (0 <= sx < W and 0 <= sy < H and 0 <= gx < W and 0 <= gy < H):
-        return []
+        return [], [], {"expanded": 0, "pushed": 0, "discovered": 0}
     if not passable(sx, sy) or not passable(gx, gy):
-        return []
+        return [], [], {"expanded": 0, "pushed": 0, "discovered": 0}
 
     # Precompute a cheap distance-to-trajectory field.
     # For 100x100 with T~64 this is fast and stable.
@@ -502,12 +512,32 @@ def _extract_grid_path_from_trajectory(
     diag = float(np.hypot(H - 1, W - 1)) + 1e-8
     corridor_cost = ((dist / diag) ** 2).astype(np.float32)
 
-    heap: list[tuple[float, tuple[int, int]]] = [(0.0, start)]
+    passable_mask = (elevation_grid >= 0) & (~np.isinf(elevation_grid))
+    h_to_goal = None
+    if refine == "astar_model":
+        h_to_goal = _relaxed_corridor_cost_to_goal(
+            corridor_cost=corridor_cost,
+            passable=passable_mask,
+            goal=goal,
+            step_cost=1.0,
+            corridor_weight=corridor_weight,
+        )
+
+    stats = {"expanded": 0, "pushed": 0, "discovered": 1}
+
+    # Heap items are (priority, g_cost, node) so we can skip stale pops.
+    heap: list[tuple[float, float, tuple[int, int]]] = [(0.0, 0.0, start)]
     came_from: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
     cost_so_far: dict[tuple[int, int], float] = {start: 0.0}
 
+    explored: list[tuple[int, int]] = []
+
     while heap:
-        cost, current = heapq.heappop(heap)
+        priority, g_cost, current = heapq.heappop(heap)
+        if g_cost != cost_so_far.get(current):
+            continue
+        explored.append(current)
+        stats["expanded"] += 1
         if current == goal:
             break
 
@@ -529,12 +559,24 @@ def _extract_grid_path_from_trajectory(
             new_cost = cost_so_far[current] + move_cost
             nxt = (nx, ny)
             if nxt not in cost_so_far or new_cost < cost_so_far[nxt]:
+                if nxt not in cost_so_far:
+                    stats["discovered"] += 1
                 cost_so_far[nxt] = new_cost
                 came_from[nxt] = current
-                heapq.heappush(heap, (new_cost, nxt))
+
+                pr = new_cost
+                if refine == "astar_model":
+                    pr = new_cost + float(h_to_goal[ny, nx])
+                elif refine == "greedy_model":
+                    # Fast but not optimal: push harder toward the predicted corridor.
+                    # (corridor_cost is already included in g via traj_cost)
+                    pr = new_cost + 10.0 * float(corridor_cost[ny, nx])
+
+                heapq.heappush(heap, (pr, new_cost, nxt))
+                stats["pushed"] += 1
 
     if goal not in came_from:
-        return []
+        return [], explored, stats
 
     path: list[tuple[int, int]] = []
     cur = goal
@@ -546,4 +588,46 @@ def _extract_grid_path_from_trajectory(
         cur = parent
     path.append(start)
     path.reverse()
-    return path
+    return path, explored, stats
+
+
+def _relaxed_corridor_cost_to_goal(
+    *,
+    corridor_cost: np.ndarray,
+    passable: np.ndarray,
+    goal: tuple[int, int],
+    step_cost: float,
+    corridor_weight: float,
+) -> np.ndarray:
+    """Admissible heuristic to-go for corridor refinement.
+
+    Relaxed edge cost drops climb and keeps:
+      w' = step_cost + corridor_weight * corridor_cost
+    """
+    H, W = corridor_cost.shape
+    gx, gy = goal
+    h = np.full((H, W), np.inf, dtype=np.float32)
+    if not (0 <= gx < W and 0 <= gy < H):
+        return h
+    if not passable[gy, gx]:
+        return h
+
+    h[gy, gx] = 0.0
+    heap: list[tuple[float, tuple[int, int]]] = [(0.0, goal)]
+    while heap:
+        cost, (cx, cy) = heapq.heappop(heap)
+        if cost != h[cy, cx]:
+            continue
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nx, ny = cx + dx, cy + dy
+            if not (0 <= nx < W and 0 <= ny < H):
+                continue
+            if not passable[ny, nx]:
+                continue
+            w = step_cost + corridor_weight * float(corridor_cost[ny, nx])
+            nc = cost + w
+            if nc < h[ny, nx]:
+                h[ny, nx] = nc
+                heapq.heappush(heap, (nc, (nx, ny)))
+
+    return h

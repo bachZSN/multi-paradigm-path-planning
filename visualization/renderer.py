@@ -204,19 +204,20 @@ class Renderer:
         if cost is None:
             return  # Don't draw if no cost
 
-        # Position below the legend
-        legend_x = self.render_area.right + self.margin
-        button_height = 80
-        legend_y = 100 + 3 * (button_height) + self.margin  # Below legend height + margin
-
-        # Clear the area where the cost text will be drawn
-        text_width = 200  # Approximate width of the text area
-        text_height = 40  # Approximate height of the text area
-        clear_rect = pygame.Rect(legend_x, legend_y, text_width, text_height)
-        pygame.draw.rect(self.screen, (255, 255, 255), clear_rect)  # Fill with background color
-
-        # Draw cost text
-        font = pygame.font.Font(None, 36)
+        # Draw cost in the strip below the map.
+        pad = 8
+        font = pygame.font.Font(None, 32)
         cost_text = f"Total Cost: {cost:.1f}"
-        text_surface = font.render(cost_text, True, (0, 0, 0))  # Black text
-        self.screen.blit(text_surface, (legend_x, legend_y))
+        text_surface = font.render(cost_text, True, (0, 0, 0))
+
+        x = self.render_area.x
+        y = min(self.render_area.bottom + 10, self.screen.get_height() - text_surface.get_height() - 2 * pad)
+
+        clear_rect = pygame.Rect(
+            x,
+            y,
+            self.render_area.width,
+            text_surface.get_height() + 2 * pad,
+        )
+        pygame.draw.rect(self.screen, (255, 255, 255), clear_rect)
+        self.screen.blit(text_surface, (x + pad, y + pad))

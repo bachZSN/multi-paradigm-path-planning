@@ -238,7 +238,8 @@ def infer_path(model, world, start, goal,
                num_sample_steps: int = 50,
                guidance_scale: float = 4.0,
                device: str = "cpu",
-               metrics: dict | None = None) -> tuple[list, list]:
+               metrics: dict | None = None,
+               refine: str = "dijkstra") -> tuple[list, list]:
     """
     Run the trained diffusion model to predict a path between start and goal.
 
@@ -311,20 +312,25 @@ def infer_path(model, world, start, goal,
     pred_world = F.interpolate(pred, size=(H, W), mode="bilinear", align_corners=False)
     path_confidence = pred_world[0, 0].cpu().numpy()  # [H, W]
 
-    # 5. Extract path at full resolution using terrain-aware Dijkstra
+    # 5. Extract path at full resolution using terrain-aware search
     t_refine_start = time.perf_counter()
-    path_coords = _extract_path(path_confidence, raw_elevation, start, goal)
+    path_coords, explored, refine_stats = _extract_path(path_confidence, raw_elevation, start, goal, refine=refine)
     t_refine_end = time.perf_counter()
     if metrics is not None:
         metrics["grid.refine_seconds"] = t_refine_end - t_refine_start
         metrics["grid.total_seconds"] = t_refine_end - t_sample_start
-    return (path_coords, path_coords) if path_coords else ([], [])
+        metrics["grid.refine_expanded"] = int(refine_stats.get("expanded", 0))
+        metrics["grid.refine_pushed"] = int(refine_stats.get("pushed", 0))
+        metrics["grid.refine_discovered"] = int(refine_stats.get("discovered", 0))
+    return (explored, path_coords) if path_coords else ([], [])
 
 
 def _extract_path(confidence_grid: np.ndarray,
                   elevation_grid: np.ndarray,
                   start: tuple[int, int],
-                  goal: tuple[int, int]) -> list[tuple[int, int]]:
+                  goal: tuple[int, int],
+                  *,
+                  refine: str = "dijkstra") -> tuple[list[tuple[int, int]], list[tuple[int, int]], dict]:
     """
     Terrain-aware Dijkstra guided by the model's confidence map.
 
@@ -342,12 +348,47 @@ def _extract_path(confidence_grid: np.ndarray,
     H, W = confidence_grid.shape
     prob_map = 1.0 / (1.0 + np.exp(-confidence_grid))
 
-    heap = [(0.0, start)]
+    passable = (elevation_grid >= 0) & (~np.isinf(elevation_grid))
+    sx, sy = start
+    gx, gy = goal
+    if not (0 <= sx < W and 0 <= sy < H and 0 <= gx < W and 0 <= gy < H):
+        return [], [], {"expanded": 0, "pushed": 0, "discovered": 0}
+    if not passable[sy, sx] or not passable[gy, gx]:
+        return [], [], {"expanded": 0, "pushed": 0, "discovered": 0}
+
+    # Costs derived from the model output (confidence) and terrain.
+    # refine:
+    #   - "dijkstra": priority = g
+    #   - "astar_model": priority = g + h_model (admissible h from relaxed cost)
+    #   - "greedy_model": priority = g + h + extra_model_bias (fast, not optimal)
+
+    if refine not in {"dijkstra", "astar_model", "greedy_model"}:
+        raise ValueError(f"Unknown refine mode: {refine}")
+
+    # Precompute an admissible heuristic to-go under a relaxed cost that
+    # drops climb but keeps step + model terms. This is a lower bound on the
+    # full cost so A* remains optimal.
+    h_to_goal = None
+    if refine == "astar_model":
+        h_to_goal = _relaxed_cost_to_goal(prob_map, passable, goal)
+
+    stats = {"expanded": 0, "pushed": 0, "discovered": 1}
+
+    # Heap items are (priority, g_cost, node). We keep g for stale-pop checks.
+    heap: list[tuple[float, float, tuple[int, int]]] = [(0.0, 0.0, start)]
     came_from = {start: None}
     cost_so_far = {start: 0.0}
 
+    explored: list[tuple[int, int]] = []
+
     while heap:
-        cost, current = heapq.heappop(heap)
+        priority, g_cost, current = heapq.heappop(heap)
+        # Skip stale heap entries.
+        if g_cost != cost_so_far.get(current):
+            continue
+
+        explored.append(current)
+        stats["expanded"] += 1
         if current == goal:
             break
         cx, cy = current
@@ -355,6 +396,8 @@ def _extract_path(confidence_grid: np.ndarray,
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             nx, ny = cx + dx, cy + dy
             if not (0 <= nx < W and 0 <= ny < H):
+                continue
+            if not passable[ny, nx]:
                 continue
 
             target_elev = elevation_grid[ny, nx]
@@ -365,12 +408,26 @@ def _extract_path(confidence_grid: np.ndarray,
 
             new_cost = cost_so_far[current] + total_move_cost
             if (nx, ny) not in cost_so_far or new_cost < cost_so_far[(nx, ny)]:
+                if (nx, ny) not in cost_so_far:
+                    stats["discovered"] += 1
                 cost_so_far[(nx, ny)] = new_cost
-                heapq.heappush(heap, (new_cost, (nx, ny)))
+
+                # Priority selection
+                priority = new_cost
+                if refine == "astar_model":
+                    # Admissible heuristic (lower bound) from relaxed cost.
+                    priority = new_cost + float(h_to_goal[ny, nx])
+                elif refine == "greedy_model":
+                    # Fast but not optimal: bias directly toward high confidence.
+                    # Note: this double-counts model guidance (also in model_penalty).
+                    priority = new_cost + 10.0 * (1.0 - prob_map[ny, nx])
+
+                heapq.heappush(heap, (priority, new_cost, (nx, ny)))
+                stats["pushed"] += 1
                 came_from[(nx, ny)] = current
 
     if goal not in came_from:
-        return []
+        return [], explored, stats
 
     path = []
     cur = goal
@@ -379,4 +436,50 @@ def _extract_path(confidence_grid: np.ndarray,
         cur = came_from[cur]
     path.append(start)
     path.reverse()
-    return path
+    return path, explored, stats
+
+
+def _relaxed_cost_to_goal(prob_map: np.ndarray,
+                          passable: np.ndarray,
+                          goal: tuple[int, int],
+                          *,
+                          step_cost: float = 1.0,
+                          model_weight: float = 50.0) -> np.ndarray:
+    """Compute admissible heuristic h(n) to goal under relaxed cost.
+
+    Relaxed edge cost drops climb and keeps:
+      w' = step_cost + model_weight * (1 - prob_map)
+
+    Since w' <= w_full, shortest-path distance under w' is a lower bound
+    on the true remaining cost, so it is admissible for A*.
+    """
+    import heapq
+
+    H, W = prob_map.shape
+    gx, gy = goal
+    h = np.full((H, W), np.inf, dtype=np.float32)
+    if not (0 <= gx < W and 0 <= gy < H):
+        return h
+    if not passable[gy, gx]:
+        return h
+
+    h[gy, gx] = 0.0
+    heap: list[tuple[float, tuple[int, int]]] = [(0.0, goal)]
+
+    while heap:
+        cost, (cx, cy) = heapq.heappop(heap)
+        if cost != h[cy, cx]:
+            continue
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nx, ny = cx + dx, cy + dy
+            if not (0 <= nx < W and 0 <= ny < H):
+                continue
+            if not passable[ny, nx]:
+                continue
+            w = step_cost + model_weight * (1.0 - float(prob_map[ny, nx]))
+            nc = cost + w
+            if nc < h[ny, nx]:
+                h[ny, nx] = nc
+                heapq.heappush(heap, (nc, (nx, ny)))
+
+    return h
