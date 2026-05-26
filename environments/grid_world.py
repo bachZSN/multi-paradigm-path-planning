@@ -47,22 +47,36 @@ class GridWorld:
         self.update_heights()
 
     def add_mountain(self, x, y, height=1, radius=5, function="relu"):
-        for row in range(self.height):
-            for col in range(self.width):
-                distance = np.sqrt((x - col) ** 2 + (y - row) ** 2)
-                if distance <= radius and self.is_valid((col, row)):
-                    if function == "relu":
-                        self.grid[row, col] += max(0, height * (1 - distance / radius))
-                    elif function == "arctan":
-                        self.grid[row, col] += height * (1 - np.arctan(distance) / np.pi)
+        # Vectorized implementation (much faster than Python loops).
+        yy, xx = np.indices((self.height, self.width))
+        dist = np.sqrt((x - xx) ** 2 + (y - yy) ** 2)
+        mask = dist <= radius
+
+        # Keep semantics of is_valid/passable for impassable cells.
+        passable = (self.grid >= 0) & (~np.isinf(self.grid))
+        mask &= passable
+
+        if not np.any(mask):
+            return
+
+        if function == "relu":
+            delta = height * (1 - dist / radius)
+            delta = np.maximum(delta, 0.0)
+        elif function == "arctan":
+            delta = height * (1 - np.arctan(dist) / np.pi)
+        else:
+            raise ValueError(f"Unknown mountain function: {function}")
+
+        self.grid[mask] += delta[mask]
         self.update_heights()
 
 def create_default_world():
-    world = GridWorld(100)
+    default_size = 200
+    world = GridWorld(default_size)
 
     # add some obstacles
-    for i in range(20):
-        [x,y] = np.random.randint(0, 100, size=2)
+    for i in range(50):
+        [x,y] = np.random.randint(0, default_size, size=2)
         world.add_mountain(x, y, height=10.0, radius=20)
     return world
 

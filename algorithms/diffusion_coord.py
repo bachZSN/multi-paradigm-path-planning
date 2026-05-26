@@ -9,6 +9,7 @@ via grid_sample in the bottleneck.
 
 import math
 import heapq
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -332,7 +333,8 @@ def infer_path_coord(model, world, start: tuple[int, int], goal: tuple[int, int]
                      T: int = 64,
                      num_train_steps: int = 200,
                      num_sample_steps: int = 50,
-                     device: str = "cpu") -> tuple[list, list]:
+                     device: str = "cpu",
+                     metrics: dict | None = None) -> tuple[list, list]:
     """
     Inference loop for 1D Coordinate Diffusion.
     Generates a continuous sequence of T coordinates, then scales them back to pixels.
@@ -367,6 +369,8 @@ def infer_path_coord(model, world, start: tuple[int, int], goal: tuple[int, int]
     alphas = 1.0 - betas
     alpha_bar = torch.cumprod(alphas, dim=0)
     step_indices = torch.linspace(0, num_train_steps - 1, num_sample_steps, dtype=torch.long, device=device)
+
+    t_sample_start = time.perf_counter()
 
     # 5. Initialize the path as pure Gaussian noise: [1, T, 2]
     x_t = torch.randn((1, T, 2), device=device)
@@ -416,6 +420,10 @@ def infer_path_coord(model, world, start: tuple[int, int], goal: tuple[int, int]
         if not pixel_path or pixel_path[-1] != (px, py):
             pixel_path.append((px, py))
 
+    t_sample_end = time.perf_counter()
+    if metrics is not None:
+        metrics["coord.sample_seconds"] = t_sample_end - t_sample_start
+
     if not pixel_path:
         return [], []
 
@@ -432,12 +440,17 @@ def infer_path_coord(model, world, start: tuple[int, int], goal: tuple[int, int]
 
     # 8. Symbolic post-pass: convert the (possibly jagged) trajectory to a
     # grid-valid path via a Dijkstra search guided by the trajectory corridor.
+    t_refine_start = time.perf_counter()
     refined = _extract_grid_path_from_trajectory(
         trajectory_pixels=pixel_path,
         elevation_grid=world.grid,
         start=start,
         goal=goal,
     )
+    t_refine_end = time.perf_counter()
+    if metrics is not None:
+        metrics["coord.refine_seconds"] = t_refine_end - t_refine_start
+        metrics["coord.total_seconds"] = (t_refine_end - t_sample_start)
 
     # If refinement fails (e.g. disconnected due to obstacles), fall back to
     # the raw predicted pixels so the UI still shows something.
