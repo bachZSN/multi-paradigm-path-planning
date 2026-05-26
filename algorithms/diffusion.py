@@ -1,4 +1,5 @@
 import math
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -236,7 +237,8 @@ def infer_path(model, world, start, goal,
                num_train_steps: int = 200,
                num_sample_steps: int = 50,
                guidance_scale: float = 4.0,
-               device: str = "cpu") -> tuple[list, list]:
+               device: str = "cpu",
+               metrics: dict | None = None) -> tuple[list, list]:
     """
     Run the trained diffusion model to predict a path between start and goal.
 
@@ -290,10 +292,19 @@ def infer_path(model, world, start, goal,
     start_map = start_map.to(device)
     goal_map = goal_map.to(device)
 
-    pred = ddim_sample_cfg(model, elev_t, start_map, goal_map,
-                           num_train_steps=num_train_steps,
-                           num_sample_steps=num_sample_steps,
-                           guidance_scale=guidance_scale)
+    t_sample_start = time.perf_counter()
+    pred = ddim_sample_cfg(
+        model,
+        elev_t,
+        start_map,
+        goal_map,
+        num_train_steps=num_train_steps,
+        num_sample_steps=num_sample_steps,
+        guidance_scale=guidance_scale,
+    )
+    t_sample_end = time.perf_counter()
+    if metrics is not None:
+        metrics["grid.sample_seconds"] = t_sample_end - t_sample_start
     # pred is [1, 1, model_size, model_size]
 
     # 4. Upsample to full world resolution
@@ -301,7 +312,12 @@ def infer_path(model, world, start, goal,
     path_confidence = pred_world[0, 0].cpu().numpy()  # [H, W]
 
     # 5. Extract path at full resolution using terrain-aware Dijkstra
+    t_refine_start = time.perf_counter()
     path_coords = _extract_path(path_confidence, raw_elevation, start, goal)
+    t_refine_end = time.perf_counter()
+    if metrics is not None:
+        metrics["grid.refine_seconds"] = t_refine_end - t_refine_start
+        metrics["grid.total_seconds"] = t_refine_end - t_sample_start
     return (path_coords, path_coords) if path_coords else ([], [])
 
 

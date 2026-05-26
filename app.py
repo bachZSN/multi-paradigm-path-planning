@@ -22,7 +22,7 @@ class App:
         self.explored_path = None
         self.shortest_path = None
         self.show_path = True
-        self.agent = Agent(start=(92, 5), goal=(7, 175))
+        self.agent = Agent(start=(92, 5), goal=(2, 85))
         self.agents = [self.agent]
 
     def reset_world(self):
@@ -45,13 +45,46 @@ class App:
                 if not os.path.exists(ckpt):
                     print(f"  No checkpoint found at {ckpt}. Train one with: python -m experiments.train_diffusion")
                     return
+
+                # Baseline A* for timing/cost comparison
+                t0 = time.perf_counter()
+                _explored_astar, path_astar = astar(self.agent.start, self.agent.goal, self.world)
+                t1 = time.perf_counter()
+                cost_astar = calculate_total_cost(path_astar, self.world) if path_astar else None
+
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 model = PathUNet(in_channels=4, out_channels=1, time_dim=256)
-                explored, shortest = infer_path(model, self.world, self.agent.start,
-                                                self.agent.goal, checkpoint=ckpt, device=device)
+
+                metrics = {}
+                explored, shortest = infer_path(
+                    model,
+                    self.world,
+                    self.agent.start,
+                    self.agent.goal,
+                    checkpoint=ckpt,
+                    device=device,
+                    metrics=metrics,
+                )
                 self.explored_path = explored if explored else None
                 self.shortest_path = shortest if shortest else None
                 print(f"  Diffusion path found: {len(self.shortest_path) if self.shortest_path else 0} waypoints")
+
+                cost_grid = calculate_total_cost(self.shortest_path, self.world) if self.shortest_path else None
+
+                print("  Metrics:")
+                print(f"    A* time:        {(t1 - t0) * 1000.0:.2f} ms")
+                if cost_astar is not None:
+                    print(f"    A* cost:        {cost_astar:.2f}")
+                if "grid.sample_seconds" in metrics:
+                    print(f"    Diffuse sample: {metrics['grid.sample_seconds'] * 1000.0:.2f} ms")
+                if "grid.refine_seconds" in metrics:
+                    print(f"    Refine search:  {metrics['grid.refine_seconds'] * 1000.0:.2f} ms")
+                if "grid.total_seconds" in metrics:
+                    print(f"    Total:          {metrics['grid.total_seconds'] * 1000.0:.2f} ms")
+                if cost_grid is not None:
+                    print(f"    Diffusion cost: {cost_grid:.2f}")
+                if (cost_astar is not None) and (cost_grid is not None):
+                    print(f"    Cost delta:     {cost_grid - cost_astar:+.2f} (Diffusion - A*)")
             case "Coord-Diff":
                 print ("Running coordinate trajectory diffusion model ...")
                 import torch

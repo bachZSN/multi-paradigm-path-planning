@@ -1,6 +1,12 @@
 # Multi-Paradigm Path Planning
 
-A comparative study of search, diffusion, and constraint-based path planning on shared grid-world environments with elevation terrain.
+A comparative study of classic search and diffusion-guided planning on shared grid-world environments with elevation terrain.
+
+This repo contains:
+
+- Baselines: BFS, Dijkstra, A*
+- Grid diffusion: predict a 2D path confidence heatmap, then refine with a terrain-aware shortest-path search
+- Coordinate diffusion: predict a continuous waypoint trajectory, then refine to a valid grid path
 
 ## Project Structure
 
@@ -18,7 +24,7 @@ A comparative study of search, diffusion, and constraint-based path planning on 
 │   ├── astar.py                     # A*, Dijkstra, BFS, cost calculation
 │   ├── diffusion.py                 # Grid-based PathUNet + DDPM + DDIM/CFG infer
 │   ├── diffusion_coord.py           # 1D trajectory TrajectoryUNet1D + DDPM + in-painting
-│   └── __init__.py                  # Exports all algorithm modules
+│   └── __init__.py                  # Lazy exports (keeps torch import out of app startup)
 │
 ├── experiments/
 │   ├── make_dataset.py              # Dataset generator (grid-based: elevation + path maps)
@@ -45,6 +51,8 @@ pip install -r requirements.txt
 
 Requires Python 3.10+ and PyTorch.
 
+If you are running the UI, you also need `pygame` (installed via `requirements.txt`).
+
 ## Running the App
 
 ```bash
@@ -64,11 +72,13 @@ python main.py
 
 Click any button with the mouse to activate it.
 
+When you run `Diffusion` or `Coord-Diff`, the app prints timing and cost metrics comparing diffusion vs baseline A*.
+
 ## Training the Models
 
 ### Grid-Based Diffusion (`PathUNet`)
 
-Generates 2D occupancy heatmaps, extracts path via terrain-aware Dijkstra.
+Predicts a 2D path confidence map (heatmap) and then extracts a grid-valid path with a terrain-aware shortest-path search.
 
 ```bash
 # Generate dataset + train in one step (caches to data/training_dataset.pt)
@@ -88,7 +98,13 @@ python -m experiments.train_diffusion \
     --checkpoint data/diffusion_model.pt
 ```
 
-The model outputs 2D confidence maps at reduced resolution (32×32). The inference pipeline (`infer_path`) upsamples to full world resolution and uses Dijkstra with a neuro-symbolic cost function: `step_cost + climb_penalty × 20 + model_penalty × 50`.
+The model runs at reduced resolution (`--world-size`, default `32×32`). In the app, the world is larger (see `create_default_world()`), so inference downsamples elevation + start/goal heatmaps to model resolution, runs diffusion, then upsamples the predicted confidence map back to full resolution before refinement.
+
+Refinement uses a Dijkstra-style search with a neuro-symbolic cost:
+
+- `step_cost = 1`
+- `climb_penalty = max(0, Δelevation) * 20`
+- `model_penalty = (1 - sigmoid(confidence)) * 50`
 
 **Loss guide:**
 
@@ -99,7 +115,7 @@ The model outputs 2D confidence maps at reduced resolution (32×32). The inferen
 
 ### 1D Trajectory Diffusion (`TrajectoryUNet1D`)
 
-Generates path waypoints directly as continuous `[T, 2]` sequences using start/goal in-painting sampling.
+Predicts a continuous `[T, 2]` waypoint sequence, then converts it into a grid-valid path with a terrain-aware refinement search.
 
 ```bash
 # Generate + train (caches to data/trajectory_dataset.pt)
@@ -117,7 +133,14 @@ python -m experiments.train_diffusion_coord \
     --checkpoint data/diffusion_coord_model.pt
 ```
 
-The model uses 1D temporal convolutions over the trajectory timeline. It queries the 2D elevation map via `F.grid_sample` in the bottleneck. Sampling clamps start (index 0) and goal (index T−1) at every denoising step.
+The model uses 1D temporal convolutions over the trajectory timeline and conditions on:
+
+- elevation map (queried via `F.grid_sample`)
+- start and goal coordinates (provided as inputs and also enforced during sampling)
+
+Sampling performs endpoint in-painting: start (index `0`) and goal (index `T-1`) are clamped at every denoising step.
+
+Checkpoint note: changes to the coordinate model architecture require retraining; if you see a size-mismatch when loading `data/diffusion_coord_model.pt`, retrain with `python -m experiments.train_diffusion_coord`.
 
 ### Dataset Contents
 
@@ -134,23 +157,26 @@ Each sample returns:
 
 - `trajectory` `[T, 2]` — interpolated waypoints normalised to `[-1, 1]`
 - `elevation` `[1, H, W]` — normalised terrain
+- `start` `[2]` — normalised to `[-1, 1]`
+- `goal` `[2]` — normalised to `[-1, 1]`
 
 ## How the Diffusion Models Work
 
 ### Grid-Based Pipeline
 
-1. Condition the model on 4 input channels (noisy path + elevation + start + goal maps)
-2. DDIM sampling with CFG at `guidance_scale=4.0` produces a 2D confidence map
-3. Upsample to full world resolution via `F.interpolate`
-4. Dijkstra extracts the lowest-cost path using: `step_cost + climb × 20 + (1 − confidence) × 50`
+1. Build start/goal heatmaps and downsample elevation to model resolution
+2. Condition the model on 4 channels: `(noisy_path, elevation, start_map, goal_map)`
+3. Run CFG-guided DDIM sampling to produce a 2D confidence map
+4. Upsample confidence to full world resolution
+5. Run terrain-aware shortest-path search guided by confidence to produce a connected, grid-valid path
 
 ### Coordinate-Based Pipeline
 
-1. Start/goal are normalised to `[-1, 1]` range
-2. Model is initial trajectory as pure noise
-3. DDPM in-painting sampling: model predicts noise, denoises trajectory, clamps start/goal
-4. Output `[T, 2]` waypoints are de-normalised to integer world coordinates
-5. Consecutive duplicate waypoints are removed
+1. Normalise start/goal to `[-1, 1]` and initialise a trajectory as noise
+2. DDIM-style sampling predicts and removes noise over `T` timesteps
+3. Clamp the endpoints (in-painting) at every denoising step
+4. De-normalise to world pixel coordinates
+5. Refine to a grid-valid path using a terrain-aware search biased toward the predicted trajectory corridor
 
 ## Configuration
 
@@ -158,6 +184,27 @@ All constants used by the app (checkpoint paths, model sizes) are in `app.py`. T
 
 - `data/diffusion_model.pt` — grid PathUNet (117 MB with fp32 weights)
 - `data/diffusion_coord_model.pt` — 1D TrajectoryUNet1D (smaller, ~5–15 MB)
+
+## Metrics (Printed By The App)
+
+The UI actions print:
+
+- Baseline A*: `A* time`, `A* cost`
+- Grid diffusion: `Diffuse sample`, `Refine search`, `Total`, `Diffusion cost`, `Cost delta`
+- Coord diffusion: `Diffuse sample`, `Refine search`, `Total`, `Coord cost`, `Cost delta`
+
+The diffusion methods include a refinement stage, so “diffusion time” is reported as separate sampling and refinement components.
+
+## Why “Corridor Dijkstra” Can Be Faster Than A*
+
+The refinement search is guided by a strong corridor term (derived from the model’s confidence or trajectory distance). This can drastically reduce the number of states that are competitive in the priority queue, so the search often expands far fewer nodes than baseline A*.
+
+In contrast, the baseline A* heuristic is Manhattan distance while the true path cost includes elevation, so the heuristic can be weak and A* may expand close to Dijkstra-level nodes.
+
+## Performance Notes
+
+- App startup is kept fast by lazily importing torch-heavy modules only when diffusion buttons are used.
+- Terrain generation is vectorized; `create_default_world()` should be fast even for larger maps.
 
 ## Citation & Paper
 

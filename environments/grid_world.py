@@ -71,11 +71,11 @@ class GridWorld:
         self.update_heights()
 
 def create_default_world():
-    default_size = 200
+    default_size = 100
     world = GridWorld(default_size)
 
     # add some obstacles
-    for i in range(50):
+    for i in range(30):
         [x,y] = np.random.randint(0, default_size, size=2)
         world.add_mountain(x, y, height=10.0, radius=20)
     return world
